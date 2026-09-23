@@ -6,10 +6,12 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 /**
- * Toggle this to `true` when developing without the backend running.
- * All functions will return realistic mock data after a simulated delay.
+ * Toggle this to `true` (or set NEXT_PUBLIC_MOCK_MODE=true in .env.local)
+ * when developing without the backend running.
+ * All functions will return realistic mock data after simulated delays.
  */
-const MOCK_MODE = false;
+export const MOCK_MODE =
+  process.env.NEXT_PUBLIC_MOCK_MODE === "true" || false;
 
 // ─── Type Definitions ────────────────────────────────────────────────────────
 
@@ -299,6 +301,8 @@ async function apiFetch<T>(
 
 // ─── Exported API Functions ──────────────────────────────────────────────────
 
+const mockProjectStartTimes = new Map<string, number>();
+
 /**
  * Create a new research project by submitting a topic string.
  * The backend will start the autonomous multi-agent pipeline.
@@ -307,8 +311,10 @@ export async function createResearch(
   topic: string
 ): Promise<{ project_id: string }> {
   if (MOCK_MODE) {
-    await delay(800);
-    return { project_id: MOCK_PROJECT_ID };
+    await delay(600);
+    const id = `mock-${Date.now().toString(36)}`;
+    mockProjectStartTimes.set(id, Date.now());
+    return { project_id: id };
   }
 
   return apiFetch<{ project_id: string }>("/api/research", {
@@ -323,13 +329,61 @@ export async function createResearch(
  */
 export async function getResearchStatus(id: string): Promise<ResearchStatus> {
   if (MOCK_MODE) {
-    await delay(300);
-    return {
-      status: "done",
-      current_step: "Pipeline complete",
-      papers_found: MOCK_PAPERS.length,
-      papers_analyzed: MOCK_PAPERS.length,
-    };
+    await delay(200);
+    const startTime = mockProjectStartTimes.get(id) || Date.now() - 15000;
+    const elapsedSec = (Date.now() - startTime) / 1000;
+
+    if (elapsedSec < 3) {
+      return {
+        status: "pending",
+        current_step: "Formulating multi-angle semantic search queries...",
+        papers_found: 0,
+        papers_analyzed: 0,
+      };
+    } else if (elapsedSec < 7) {
+      return {
+        status: "searching",
+        current_step: "Retrieving candidate papers from OpenAlex and Semantic Scholar...",
+        papers_found: 12,
+        papers_analyzed: 0,
+      };
+    } else if (elapsedSec < 14) {
+      const analyzed = Math.min(12, Math.max(1, Math.floor(((elapsedSec - 7) / 7) * 12)));
+      return {
+        status: "analyzing",
+        current_step: `Extracting methodology, benchmarks, and limitations (${analyzed}/12)...`,
+        papers_found: 12,
+        papers_analyzed: analyzed,
+      };
+    } else if (elapsedSec < 18) {
+      return {
+        status: "comparing",
+        current_step: "Cross-paper comparative synthesis across dimensions...",
+        papers_found: 12,
+        papers_analyzed: 12,
+      };
+    } else if (elapsedSec < 22) {
+      return {
+        status: "gap_finding",
+        current_step: "Synthesizing unaddressed research gaps with citation evidence...",
+        papers_found: 12,
+        papers_analyzed: 12,
+      };
+    } else if (elapsedSec < 26) {
+      return {
+        status: "reporting",
+        current_step: "Compiling executive academic synthesis report...",
+        papers_found: 12,
+        papers_analyzed: 12,
+      };
+    } else {
+      return {
+        status: "done",
+        current_step: "Pipeline complete. Research gaps synthesized.",
+        papers_found: 12,
+        papers_analyzed: 12,
+      };
+    }
   }
 
   return apiFetch<ResearchStatus>(`/api/research/${id}/status`);
