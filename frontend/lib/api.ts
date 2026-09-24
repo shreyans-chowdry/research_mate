@@ -31,7 +31,27 @@ export interface PaperWithAnalysis {
   year: number;
   oa_status: boolean;
   source: string;
+  pdf_url?: string | null;
+  doi?: string | null;
   analysis: PaperAnalysis;
+}
+
+export interface CitationSuggestion {
+  paper_id: string;
+  title: string;
+  relevance_reason: string;
+}
+
+export interface PaperCritique {
+  overall_score: number;
+  readiness_level: string;
+  executive_summary: string;
+  gap_alignment: string;
+  methodology_critique: string;
+  benchmark_suggestions: string[];
+  missing_citations: CitationSuggestion[];
+  actionable_recommendations: string[];
+  suggested_changes_markdown: string;
 }
 
 export interface ResearchGap {
@@ -47,6 +67,7 @@ export interface ResearchStatus {
   current_step: string;
   papers_found: number;
   papers_analyzed: number;
+  topic?: string;
 }
 
 export interface ComparisonDimension {
@@ -474,5 +495,68 @@ export async function deleteResearchProject(id: string): Promise<void> {
   await apiFetch<void>(`/api/research/${id}`, {
     method: "DELETE",
   });
+}
+
+/**
+ * Generate a download URL for a reference paper.
+ */
+export function getPaperDownloadUrl(
+  projectId: string,
+  paperId: string,
+  format: "text" | "pdf" = "text"
+): string {
+  return `${BASE_URL}/api/research/${projectId}/papers/${paperId}/download?format=${format}`;
+}
+
+/**
+ * Evaluate a user's draft paper against project's synthesized literature and gaps.
+ */
+export async function critiqueUserPaper(
+  projectId: string,
+  params: { title: string; draft_text: string; focus_area?: string }
+): Promise<PaperCritique> {
+  if (MOCK_MODE) {
+    await delay(1200);
+    return {
+      overall_score: 80,
+      readiness_level: "Solid Draft with Key Revisions Needed",
+      executive_summary: `The submitted manuscript presents an insightful angle on the research topic. Experimental baselines need anchoring against recently synthesized literature gaps.`,
+      gap_alignment: "Partially aligns with identified literature gaps, particularly cross-environment robustness.",
+      methodology_critique: "The core architecture is sound, but lacks formal ablation studies and runtime latency benchmarks.",
+      benchmark_suggestions: [
+        "Include standardized domain benchmark suites.",
+        "Perform stress tests under distribution shifts.",
+        "Provide 5-fold cross-validation with statistical significance tests."
+      ],
+      missing_citations: [
+        {
+          paper_id: "mock-1",
+          title: "Related State-of-the-Art Baseline",
+          relevance_reason: "Foundational baseline that should be contrasted in Related Work."
+        }
+      ],
+      actionable_recommendations: [
+        "Explicitly differentiate your contribution in the Introduction.",
+        "Add a comparative baseline table.",
+        "Discuss limitations and edge cases in the Discussion."
+      ],
+      suggested_changes_markdown: "### Priority Manuscript Enhancements\n\n1. **Abstract**: Quantify results.\n2. **Related Work**: Position against gaps.\n3. **Ablations**: Show component contributions."
+    };
+  }
+
+  const response = await fetch(`${BASE_URL}/api/research/${projectId}/critique-paper`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Failed to critique paper: ${response.status} ${errorBody}`);
+  }
+
+  return response.json();
 }
 

@@ -18,8 +18,10 @@ import PapersTab from "./PapersTab";
 import ComparisonTab from "./ComparisonTab";
 import GapsTab from "./GapsTab";
 import ReportTab from "./ReportTab";
+import PaperCriticTab from "./PaperCriticTab";
+import { Lightbulb } from "lucide-react";
 
-export type DashboardTab = "gaps" | "papers" | "comparison" | "report";
+export type DashboardTab = "gaps" | "papers" | "comparison" | "report" | "critic";
 
 interface DashboardContainerProps {
   papers: PaperWithAnalysis[];
@@ -79,6 +81,12 @@ export default function DashboardContainer({
       id: "report",
       label: "Full Report",
       icon: BookOpen,
+    },
+    {
+      id: "critic",
+      label: "Paper Critic & Suggestions",
+      icon: Lightbulb,
+      badge: "AI Review",
     },
   ];
 
@@ -151,6 +159,7 @@ export default function DashboardContainer({
         {activeTab === "papers" && (
           <PapersTab
             papers={papers}
+            projectId={projectId}
             selectedPaperId={selectedPaperId}
             onPaperSelect={(id) => setSelectedPaperId(id)}
           />
@@ -160,6 +169,15 @@ export default function DashboardContainer({
         )}
         {activeTab === "report" && (
           <ReportTab report={report} topic={topic} projectId={projectId} />
+        )}
+        {activeTab === "critic" && (
+          <PaperCriticTab
+            projectId={projectId}
+            topic={topic}
+            papers={papers}
+            gaps={gaps}
+            onNavigateToPaper={handleNavigateToPaper}
+          />
         )}
       </div>
     </div>

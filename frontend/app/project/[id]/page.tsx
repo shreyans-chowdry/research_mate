@@ -40,6 +40,19 @@ export default function ProjectPage() {
 
   // View state: "tracker" | "dashboard"
   const [activeView, setActiveView] = useState<"tracker" | "dashboard">("tracker");
+  const userChosenViewRef = useRef<"tracker" | "dashboard" | null>(null);
+
+  // Check URL query parameters for explicit view preference (?view=tracker)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const searchParams = new URLSearchParams(window.location.search);
+      const requested = searchParams.get("view");
+      if (requested === "tracker" || requested === "dashboard") {
+        userChosenViewRef.current = requested;
+        setActiveView(requested);
+      }
+    }
+  }, []);
 
   // Synthesis data states (loaded when done)
   const [papers, setPapers] = useState<PaperWithAnalysis[]>([]);
@@ -84,8 +97,11 @@ export default function ProjectPage() {
       setIsLoading(false);
 
       if (data.status === "done") {
-        setActiveView("dashboard");
         loadSynthesisData(projectId);
+        // Only auto-switch to dashboard if the user has NOT explicitly selected tracker!
+        if (userChosenViewRef.current === null) {
+          setActiveView("dashboard");
+        }
       }
 
       return data;
@@ -179,7 +195,10 @@ export default function ProjectPage() {
           <div className="flex items-center justify-between p-3 rounded-2xl border border-border/60 bg-card/60 backdrop-blur-sm">
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setActiveView("dashboard")}
+                onClick={() => {
+                  userChosenViewRef.current = "dashboard";
+                  setActiveView("dashboard");
+                }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
                   activeView === "dashboard"
                     ? "bg-primary text-white shadow-md shadow-primary/20"
@@ -192,7 +211,10 @@ export default function ProjectPage() {
               </button>
 
               <button
-                onClick={() => setActiveView("tracker")}
+                onClick={() => {
+                  userChosenViewRef.current = "tracker";
+                  setActiveView("tracker");
+                }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
                   activeView === "tracker"
                     ? "bg-primary text-white shadow-md shadow-primary/20"
@@ -229,6 +251,7 @@ export default function ProjectPage() {
             gaps={gaps}
             report={report}
             projectId={projectId}
+            topic={status?.topic || undefined}
             initialTab="gaps"
           />
         )}

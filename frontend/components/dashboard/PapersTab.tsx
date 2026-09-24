@@ -19,17 +19,20 @@ import {
   Sparkles,
   Maximize2,
   Minimize2,
+  Download,
 } from "lucide-react";
-import { PaperWithAnalysis } from "@/lib/api";
+import { PaperWithAnalysis, getPaperDownloadUrl } from "@/lib/api";
 
 interface PapersTabProps {
   papers: PaperWithAnalysis[];
+  projectId?: string;
   selectedPaperId?: string | null;
   onPaperSelect?: (paperId: string) => void;
 }
 
 export default function PapersTab({
   papers,
+  projectId,
   selectedPaperId,
   onPaperSelect,
 }: PapersTabProps) {
@@ -198,6 +201,50 @@ export default function PapersTab({
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <Users className="w-3.5 h-3.5 shrink-0 text-muted-foreground/70" />
                       <span>{paper.authors.join(", ")}</span>
+                    </div>
+
+                    {/* Paper Download & Reference Actions */}
+                    <div
+                      className="flex flex-wrap items-center gap-2 pt-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {paper.pdf_url && (
+                        <a
+                          href={paper.pdf_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 transition-colors shadow-2xs"
+                          title="Open or Download original Open-Access PDF"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>Download PDF</span>
+                        </a>
+                      )}
+
+                      {projectId && (
+                        <a
+                          href={getPaperDownloadUrl(projectId, paper.id, "text")}
+                          download
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-secondary/80 hover:bg-secondary text-slate-700 dark:text-slate-300 border border-border/60 transition-colors shadow-2xs"
+                          title="Download extracted paper analysis and text (.txt)"
+                        >
+                          <FileText className="w-3 h-3" />
+                          <span>Extracted Content</span>
+                        </a>
+                      )}
+
+                      {paper.doi && (
+                        <a
+                          href={`https://doi.org/${paper.doi}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-border/40 transition-colors shadow-2xs"
+                          title="View Paper Record via DOI"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>DOI</span>
+                        </a>
+                      )}
                     </div>
                   </div>
 
