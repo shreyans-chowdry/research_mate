@@ -1,8 +1,21 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createResearch } from "@/lib/api";
+import Link from "next/link";
+import {
+  createResearch,
+  listResearchProjects,
+  ProjectSummary,
+} from "@/lib/api";
+import {
+  Clock,
+  BookOpen,
+  CheckCircle2,
+  Loader2,
+  ArrowRight,
+  History,
+} from "lucide-react";
 
 const SUGGESTED_TOPICS = [
   "Transformer model compression",
@@ -70,6 +83,17 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Past research state
+  const [pastProjects, setPastProjects] = useState<ProjectSummary[]>([]);
+  const [isPastLoading, setIsPastLoading] = useState(true);
+
+  useEffect(() => {
+    listResearchProjects()
+      .then((data) => setPastProjects(data))
+      .catch((err) => console.error("Failed to load past research:", err))
+      .finally(() => setIsPastLoading(false));
+  }, []);
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -103,12 +127,6 @@ export default function HomePage() {
     <div className="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8 py-12 sm:py-20">
       {/* ── Hero Section ── */}
       <div className="text-center max-w-4xl mx-auto space-y-6 animate-fade-in">
-        {/* Badge */}
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-border/60 bg-secondary/50 text-xs text-muted-foreground">
-          <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-          Multi-Agent AI Research Pipeline
-        </div>
-
         {/* Headline */}
         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1]">
           <span className="gradient-text">Autonomous Literature</span>
@@ -125,7 +143,10 @@ export default function HomePage() {
       </div>
 
       {/* ── Search Section ── */}
-      <div className="w-full max-w-2xl mx-auto mt-10 space-y-5 animate-fade-in" style={{ animationDelay: "0.15s" }}>
+      <div
+        className="w-full max-w-2xl mx-auto mt-10 space-y-5 animate-fade-in"
+        style={{ animationDelay: "0.15s" }}
+      >
         {/* Error Banner */}
         {error && (
           <div
@@ -168,7 +189,7 @@ export default function HomePage() {
         {/* Search Form */}
         <form onSubmit={handleSubmit} className="relative group" id="search-form">
           <div className="relative gradient-border rounded-2xl">
-            <div className="flex items-center bg-card rounded-2xl overflow-hidden">
+            <div className="flex items-center bg-card rounded-2xl overflow-hidden shadow-sm dark:shadow-none border border-border/40">
               {/* Search Icon */}
               <div className="pl-5 text-muted-foreground">
                 <svg
@@ -285,7 +306,7 @@ export default function HomePage() {
           {PIPELINE_STEPS.map((step, i) => (
             <div
               key={step.title}
-              className="group relative flex flex-col items-center text-center p-5 rounded-2xl border border-border/30 bg-card/50 hover:bg-card hover:border-border/60 transition-all duration-300"
+              className="group relative flex flex-col items-center text-center p-5 rounded-2xl border border-border/40 bg-card/70 hover:bg-card hover:border-border/70 shadow-sm dark:shadow-none transition-all duration-300"
             >
               {/* Step Number */}
               <div className="absolute top-3 right-3 text-[10px] font-mono text-muted-foreground/30">
@@ -327,6 +348,102 @@ export default function HomePage() {
           ))}
         </div>
       </div>
+
+      {/* ── Past Research Investigations ── */}
+      {pastProjects.length > 0 && (
+        <div
+          className="w-full max-w-3xl mx-auto mt-16 sm:mt-24 space-y-6 animate-fade-in"
+          style={{ animationDelay: "0.35s" }}
+        >
+          <div className="flex items-center justify-between border-b border-border/40 pb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                <History className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-foreground tracking-tight">
+                  Past Research Investigations
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Access your previously synthesized literature reviews and research gaps
+                </p>
+              </div>
+            </div>
+            <span className="text-xs font-mono text-muted-foreground px-2.5 py-1 rounded-full bg-secondary border border-border/50">
+              {pastProjects.length} {pastProjects.length === 1 ? "session" : "sessions"}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {pastProjects.map((p) => {
+              const isProjectDone = p.status === "done";
+              const isProjectError = p.status === "error";
+
+              return (
+                <Link
+                  key={p.id}
+                  href={`/project/${p.id}`}
+                  className="group relative flex flex-col justify-between p-5 rounded-2xl border border-border/50 bg-card hover:bg-card/95 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5 transition-all duration-300"
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide uppercase ${
+                          isProjectDone
+                            ? "bg-success/15 text-success border border-success/30"
+                            : isProjectError
+                            ? "bg-destructive/15 text-destructive border border-destructive/30"
+                            : "bg-primary/15 text-primary border border-primary/30"
+                        }`}
+                      >
+                        {isProjectDone ? (
+                          <>
+                            <CheckCircle2 className="w-3 h-3" />
+                            Completed
+                          </>
+                        ) : isProjectError ? (
+                          "Interrupted"
+                        ) : (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            In Progress
+                          </>
+                        )}
+                      </span>
+
+                      {p.created_at && (
+                        <span className="flex items-center gap-1 text-[11px] text-muted-foreground/70">
+                          <Clock className="w-3 h-3" />
+                          {new Date(p.created_at).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </span>
+                      )}
+                    </div>
+
+                    <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2 leading-snug">
+                      {p.topic}
+                    </h3>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1.5 font-mono text-[11px]">
+                      <BookOpen className="w-3.5 h-3.5 text-muted-foreground/60" />
+                      {p.papers_count} {p.papers_count === 1 ? "paper" : "papers"}
+                    </span>
+
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-primary group-hover:translate-x-0.5 transition-transform">
+                      View Synthesis
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

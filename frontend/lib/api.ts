@@ -59,6 +59,15 @@ export interface ResearchReport {
   created_at: string;
 }
 
+export interface ProjectSummary {
+  id: string;
+  topic: string;
+  status: string;
+  current_step?: string;
+  created_at?: string;
+  papers_count: number;
+}
+
 // ─── Mock Data Fixtures ──────────────────────────────────────────────────────
 
 const MOCK_PROJECT_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
@@ -441,4 +450,15 @@ export async function getResearchReport(
   }
 
   return apiFetch<ResearchReport>(`/api/research/${id}/report`);
+}
+
+/**
+ * Retrieve all past research projects.
+ */
+export async function listResearchProjects(): Promise<ProjectSummary[]> {
+  if (MOCK_MODE) {
+    return [];
+  }
+
+  return apiFetch<ProjectSummary[]>("/api/research");
 }

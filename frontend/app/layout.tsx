@@ -110,13 +110,7 @@ export default function RootLayout({
             </Link>
 
             {/* Right Side */}
-            <div className="flex items-center gap-3 sm:gap-4">
-              {/* Status Indicator */}
-              <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-secondary/50 px-2.5 py-1 rounded-full border border-border/40">
-                <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
-                <span>System Online</span>
-              </div>
-
+            <div className="flex items-center gap-3">
               {/* Theme Toggle Bulb */}
               <ThemeToggle />
 

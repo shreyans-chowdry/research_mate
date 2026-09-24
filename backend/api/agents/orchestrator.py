@@ -82,7 +82,7 @@ async def query_generation_agent(state: ResearchGraphState) -> Dict[str, Any]:
 
     await update_project_status(
         project_id,
-        status="searching",
+        status="pending",
         current_step="Generating targeted academic search queries...",
     )
 

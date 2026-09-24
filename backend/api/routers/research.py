@@ -87,9 +87,53 @@ class ReportResponse(BaseModel):
     created_at: str
 
 
+class ProjectSummaryResponse(BaseModel):
+    id: str
+    topic: str
+    status: str
+    current_step: Optional[str] = None
+    created_at: Optional[str] = None
+    papers_count: int = 0
+
+
 # ---------------------------------------------------------------------------
 # Endpoint Handlers
 # ---------------------------------------------------------------------------
+
+@router.get("", response_model=List[ProjectSummaryResponse])
+async def list_recent_projects(
+    db: AsyncSession = Depends(get_db),
+    limit: int = 20,
+):
+    """Returns past research projects ordered by creation date."""
+    stmt = (
+        select(
+            Project.id,
+            Project.topic,
+            Project.status,
+            Project.current_step,
+            Project.created_at,
+            func.count(Paper.id).label("papers_count"),
+        )
+        .outerjoin(Paper, Paper.project_id == Project.id)
+        .group_by(Project.id)
+        .order_by(Project.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [
+        ProjectSummaryResponse(
+            id=str(r.id),
+            topic=r.topic,
+            status=r.status,
+            current_step=r.current_step,
+            created_at=r.created_at.isoformat() if r.created_at else None,
+            papers_count=r.papers_count or 0,
+        )
+        for r in rows
+    ]
+
 
 @router.post("", response_model=CreateResearchResponse, status_code=status.HTTP_201_CREATED)
 async def create_research(
