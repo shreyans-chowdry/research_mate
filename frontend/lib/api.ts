@@ -3,7 +3,7 @@
 // All functions call the real backend — no mock data, no fallbacks.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/+$/, "");
 
 // ─── Type Definitions ────────────────────────────────────────────────────────
 
