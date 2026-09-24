@@ -444,7 +444,7 @@ export default function AgentTracker({
       </div>
 
       {/* ── Live Agent Activity Terminal / Log ── */}
-      <div className="rounded-2xl border border-border/60 bg-[#080b11] overflow-hidden shadow-md">
+      <div className="rounded-2xl border border-border/60 bg-slate-950 dark:bg-[#080b11] overflow-hidden shadow-md">
         <div className="flex items-center justify-between px-4 py-2.5 bg-secondary/50 border-b border-border/40">
           <div className="flex items-center gap-2">
             <Terminal className="w-3.5 h-3.5 text-primary" />

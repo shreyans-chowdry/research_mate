@@ -1,0 +1,89 @@
+name: ResearchMate CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  backend-tests:
+    name: Backend Test Suite
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: researchmate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Verify Database Initialization
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/researchmate
+        run: |
+          python backend/db/test_db.py
+
+      - name: Run Academic Pipeline Tests
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/researchmate
+        run: |
+          python backend/pipeline/test_pipeline.py
+
+      - name: Run LangGraph Agent Tests
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/researchmate
+        run: |
+          python backend/api/agents/test_agents.py
+
+      - name: Run FastAPI Endpoints Tests
+        env:
+          DATABASE_URL: postgresql://postgres:password@localhost:5432/researchmate
+        run: |
+          python backend/api/test_api.py
+
+  frontend-build:
+    name: Frontend Build & Typecheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm install
+
+      - name: Build Next.js Application
+        run: |
+          cd frontend
+          npm run build

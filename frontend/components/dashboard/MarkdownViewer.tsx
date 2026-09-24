@@ -58,7 +58,7 @@ export default function MarkdownViewer({ content }: MarkdownViewerProps) {
         parsed.push(
           <pre
             key={`code-${key}`}
-            className="my-4 p-4 rounded-xl bg-[#080b11] border border-border/60 font-mono text-xs text-foreground/90 overflow-x-auto"
+            className="my-4 p-4 rounded-xl bg-slate-950 text-slate-100 dark:bg-[#080b11] border border-border/60 font-mono text-xs overflow-x-auto shadow-sm"
           >
             <code>{codeBlockContent.join("\n")}</code>
           </pre>

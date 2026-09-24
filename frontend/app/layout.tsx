@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
+import Image from "next/image";
 import Link from "next/link";
 import "./globals.css";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -25,27 +27,57 @@ export const metadata: Metadata = {
     "research gaps",
     "academic papers",
     "multi-agent AI",
+    "LangGraph",
   ],
+  icons: {
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/icon.png",
+  },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="en"
       className={`${inter.variable} ${jetbrainsMono.variable} dark`}
+      suppressHydrationWarning
     >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                const saved = localStorage.getItem('researchmate_theme');
+                if (saved === 'light') {
+                  document.documentElement.classList.remove('dark');
+                } else {
+                  document.documentElement.classList.add('dark');
+                }
+              } catch (e) {}
+            `,
+          }}
+        />
+      </head>
       <body className="min-h-screen flex flex-col antialiased">
         {/* ── Ambient Background Glow ── */}
         <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
           <div
-            className="absolute -top-[40%] -left-[20%] w-[70%] h-[70%] rounded-full opacity-[0.07]"
+            className="absolute -top-[40%] -left-[20%] w-[70%] h-[70%] rounded-full opacity-[0.07] dark:opacity-[0.07]"
             style={{
               background:
                 "radial-gradient(circle, var(--gradient-start), transparent 70%)",
             }}
           />
           <div
-            className="absolute -bottom-[30%] -right-[10%] w-[60%] h-[60%] rounded-full opacity-[0.05]"
+            className="absolute -bottom-[30%] -right-[10%] w-[60%] h-[60%] rounded-full opacity-[0.05] dark:opacity-[0.05]"
             style={{
               background:
                 "radial-gradient(circle, var(--gradient-end), transparent 70%)",
@@ -59,52 +91,47 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             {/* Logo & Branding */}
             <Link
               href="/"
-              className="flex items-center gap-2.5 group"
+              className="flex items-center gap-3 group"
               id="navbar-logo"
             >
-              {/* Custom Logo Icon */}
-              <div className="relative w-8 h-8 flex items-center justify-center rounded-lg bg-gradient-to-br from-[var(--gradient-start)] to-[var(--gradient-mid)] shadow-lg shadow-primary/20 group-hover:shadow-primary/40 transition-shadow duration-300">
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="text-white"
-                >
-                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                </svg>
+              <div className="relative w-9 h-9 flex items-center justify-center transition-transform duration-300 group-hover:scale-105 shrink-0">
+                <Image
+                  src="/icon.png"
+                  alt="ResearchMate Logo"
+                  width={36}
+                  height={36}
+                  priority
+                  className="w-9 h-9 object-contain drop-shadow"
+                />
               </div>
-              <span className="text-lg font-semibold tracking-tight text-foreground">
-                Research
-                <span className="gradient-text">Mate</span>
+              <span className="text-xl font-bold tracking-tight text-foreground">
+                Research<span className="gradient-text">Mate</span>
               </span>
             </Link>
 
             {/* Right Side */}
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 sm:gap-4">
               {/* Status Indicator */}
-              <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-secondary/50 px-2.5 py-1 rounded-full border border-border/40">
                 <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
                 <span>System Online</span>
               </div>
+
+              {/* Theme Toggle Bulb */}
+              <ThemeToggle />
 
               {/* GitHub Link */}
               <a
                 href="https://github.com/shreyans-chowdry/research_mate"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-muted-foreground hover:text-foreground transition-colors duration-200"
+                className="w-9 h-9 rounded-xl border border-border/60 bg-secondary/60 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors duration-200"
                 id="navbar-github-link"
                 aria-label="View source on GitHub"
               >
                 <svg
-                  width="20"
-                  height="20"
+                  width="18"
+                  height="18"
                   viewBox="0 0 24 24"
                   fill="currentColor"
                 >

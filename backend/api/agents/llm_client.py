@@ -24,8 +24,8 @@ else:
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 
-GEMINI_PRIMARY_MODEL = "gemini-2.5-flash"
-GEMINI_FALLBACK_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash"]
+GEMINI_PRIMARY_MODEL = "gemini-3.6-flash"
+GEMINI_FALLBACK_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.5-flash"]
 
 
 def extract_json_string(text: str) -> str:

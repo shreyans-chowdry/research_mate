@@ -1,8 +1,38 @@
 @import "tailwindcss";
 
-/* ─── ResearchMate — Dark-First Design System ─── */
+/* ─── ResearchMate — High-Fidelity Design System (Light & Dark) ─── */
 
 :root {
+  /* ── Light Mode Tokens (Crisp, High-Contrast Modern Slate Palette) ── */
+  --background: #f8fafc;
+  --foreground: #090d16;
+  --card: #ffffff;
+  --card-foreground: #090d16;
+  --popover: #ffffff;
+  --popover-foreground: #090d16;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #334155;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #e2e8f0;
+  --accent-foreground: #0f172a;
+  --destructive: #e11d48;
+  --destructive-foreground: #ffffff;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #4f46e5;
+  --success: #059669;
+  --warning: #d97706;
+  --info: #2563eb;
+  --gradient-start: #4f46e5;
+  --gradient-mid: #7c3aed;
+  --gradient-end: #db2777;
+}
+
+.dark {
+  /* ── Dark Mode Tokens (Deep Space Obsidian) ── */
   --background: #06070a;
   --foreground: #e8ecf1;
   --card: #0d1017;
@@ -61,6 +91,10 @@
 
 html {
   scroll-behavior: smooth;
+  color-scheme: light dark;
+}
+
+html.dark {
   color-scheme: dark;
 }
 
@@ -71,6 +105,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 /* ─── Custom Scrollbar ─── */
@@ -96,8 +131,8 @@ body {
 /* ─── Selection ─── */
 
 ::selection {
-  background: rgba(108, 99, 255, 0.3);
-  color: #ffffff;
+  background: rgba(108, 99, 255, 0.25);
+  color: inherit;
 }
 
 /* ─── Utility Animations ─── */
@@ -186,8 +221,23 @@ body {
 /* ─── Glass Effect ─── */
 
 .glass {
-  background: rgba(13, 16, 23, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.dark .glass {
+  background: rgba(13, 16, 23, 0.75);
   border: 1px solid var(--border);
+}
+
+:root:not(.dark) .glass {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05);
+}
+
+/* Light mode card elevation */
+:root:not(.dark) [class*="bg-card"] {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
 }

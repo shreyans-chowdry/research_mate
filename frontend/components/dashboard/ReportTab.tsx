@@ -130,8 +130,8 @@ export default function ReportTab({ report, topic, projectId }: ReportTabProps) 
       </div>
 
       {/* ── Document Container ── */}
-      <div className="rounded-2xl border border-border/70 bg-card/80 p-6 sm:p-10 shadow-lg">
-        <article className="prose prose-invert max-w-none">
+      <div className="rounded-2xl border border-border/70 bg-card p-6 sm:p-10 shadow-lg dark:shadow-none">
+        <article className="dark:prose-invert max-w-none">
           <MarkdownViewer content={markdownContent} />
         </article>
       </div>
