@@ -326,7 +326,21 @@ async function apiFetch<T>(
     );
   }
 
-  return res.json() as Promise<T>;
+  // Handle 204 No Content or empty response bodies safely
+  if (res.status === 204 || res.headers.get("content-length") === "0") {
+    return undefined as unknown as T;
+  }
+
+  const text = await res.text();
+  if (!text || !text.trim()) {
+    return undefined as unknown as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return text as unknown as T;
+  }
 }
 
 // ─── Exported API Functions ──────────────────────────────────────────────────
