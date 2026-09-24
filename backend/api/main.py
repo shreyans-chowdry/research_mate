@@ -43,7 +43,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS Middleware for Next.js frontend (default http://localhost:3000)
+# CORS Middleware — accepts Vercel and local frontends
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
@@ -51,9 +51,18 @@ origins = [
     "http://127.0.0.1:8000",
 ]
 
+# Add production frontend URL from environment (set this on Railway/Render)
+frontend_url = os.getenv("FRONTEND_URL", "").strip()
+if frontend_url:
+    origins.append(frontend_url)
+
+# Also allow all *.vercel.app subdomains for preview deployments
+allowed_origin_regex = r"https://.*\.vercel\.app"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
