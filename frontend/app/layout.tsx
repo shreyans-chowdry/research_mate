@@ -120,16 +120,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
 
         {/* ── Footer ── */}
         <footer className="border-t border-border/30 py-6">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-center text-xs text-muted-foreground">
             <p>
               © {new Date().getFullYear()} ResearchMate — Autonomous Agentic AI
               Research Assistant
-            </p>
-            <p className="flex items-center gap-1.5">
-              Built by{" "}
-              <span className="text-foreground/70 font-medium">
-                Shreyans & Swapnil
-              </span>
             </p>
           </div>
         </footer>
