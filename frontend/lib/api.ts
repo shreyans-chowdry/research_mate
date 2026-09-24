@@ -462,3 +462,17 @@ export async function listResearchProjects(): Promise<ProjectSummary[]> {
 
   return apiFetch<ProjectSummary[]>("/api/research");
 }
+
+/**
+ * Delete a research project and all its associated artifacts from history.
+ */
+export async function deleteResearchProject(id: string): Promise<void> {
+  if (MOCK_MODE) {
+    return;
+  }
+
+  await apiFetch<void>(`/api/research/${id}`, {
+    method: "DELETE",
+  });
+}
+

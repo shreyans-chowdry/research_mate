@@ -1,6 +1,7 @@
 import re
 import json
 import uuid
+import asyncio
 import logging
 from typing import TypedDict, List, Dict, Any, Optional
 from uuid import UUID
@@ -96,7 +97,7 @@ async def query_generation_agent(state: ResearchGraphState) -> Dict[str, Any]:
     )
 
     try:
-        response_text = call_flash(prompt, json_mode=True)
+        response_text = await asyncio.to_thread(call_flash, prompt, json_mode=True)
         cleaned_json = extract_json_string(response_text)
         queries = json.loads(cleaned_json)
 
@@ -136,7 +137,7 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
     )
 
     try:
-        raw_papers = search_papers(queries, year_min=2018, limit_per_query=4)
+        raw_papers = await asyncio.to_thread(search_papers, queries, year_min=2018, limit_per_query=4)
         if not raw_papers:
             logger.warning(f"[{project_id}] No papers found from search. Using fallback corpus.")
             raw_papers = [
@@ -161,7 +162,7 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
             pdf_url = p.get("pdf_url")
             raw_text = ""
             if pdf_url and pdf_url.startswith("http") and p.get("oa_status") and download_count < 2:
-                raw_text = download_and_extract_pdf(pdf_url)
+                raw_text = await asyncio.to_thread(download_and_extract_pdf, pdf_url)
                 if raw_text:
                     download_count += 1
 
@@ -260,7 +261,7 @@ async def paper_analysis_agent(state: ResearchGraphState) -> Dict[str, Any]:
                     f"Output strictly valid JSON. Do not include markdown or explanations outside the JSON."
                 )
 
-                resp = call_flash(prompt, json_mode=True)
+                resp = await asyncio.to_thread(call_flash, prompt, json_mode=True)
                 cleaned = extract_json_string(resp)
 
                 try:
@@ -370,7 +371,13 @@ async def comparison_agent(state: ResearchGraphState) -> Dict[str, Any]:
                     f"Return strictly the narrative text of the paragraph."
                 )
 
-                summary_text = call_opus(prompt, system="Synthesize comparative academic analysis.").strip()
+                summary_text = (
+                    await asyncio.to_thread(
+                        call_opus,
+                        prompt,
+                        system="Synthesize comparative academic analysis.",
+                    )
+                ).strip()
                 comp_id = uuid.uuid4()
 
                 db_comparison = Comparison(
@@ -455,7 +462,7 @@ async def gap_identification_agent(state: ResearchGraphState) -> Dict[str, Any]:
     gaps: List[Dict[str, Any]] = []
 
     try:
-        resp = call_flash(prompt, json_mode=True)
+        resp = await asyncio.to_thread(call_flash, prompt, json_mode=True)
         cleaned = extract_json_string(resp)
         raw_gaps = json.loads(cleaned)
 
@@ -576,7 +583,11 @@ async def report_generation_agent(state: ResearchGraphState) -> Dict[str, Any]:
     )
 
     try:
-        report_markdown = call_opus(prompt, system="Compose exhaustive academic research reports in Markdown.")
+        report_markdown = await asyncio.to_thread(
+            call_opus,
+            prompt,
+            system="Compose exhaustive academic research reports in Markdown.",
+        )
         p_uuid = UUID(str(project_id))
         report_id = uuid.uuid4()
 

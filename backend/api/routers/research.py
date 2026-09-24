@@ -201,6 +201,27 @@ async def get_research_status(
     )
 
 
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_research_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Deletes a research project and all associated cascade artifacts."""
+    try:
+        p_uuid = UUID(project_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project UUID format.")
+
+    project = await db.get(Project, p_uuid)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    await db.delete(project)
+    await db.commit()
+    logger.info(f"Deleted research project {project_id}")
+    return None
+
+
 @router.get("/{project_id}/papers", response_model=List[PaperWithAnalysisResponse])
 async def get_research_papers(
     project_id: str,

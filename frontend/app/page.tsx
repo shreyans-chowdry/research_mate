@@ -6,6 +6,7 @@ import Link from "next/link";
 import {
   createResearch,
   listResearchProjects,
+  deleteResearchProject,
   ProjectSummary,
 } from "@/lib/api";
 import {
@@ -15,6 +16,7 @@ import {
   Loader2,
   ArrowRight,
   History,
+  Trash2,
 } from "lucide-react";
 
 const SUGGESTED_TOPICS = [
@@ -87,12 +89,37 @@ export default function HomePage() {
   const [pastProjects, setPastProjects] = useState<ProjectSummary[]>([]);
   const [isPastLoading, setIsPastLoading] = useState(true);
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   useEffect(() => {
     listResearchProjects()
       .then((data) => setPastProjects(data))
       .catch((err) => console.error("Failed to load past research:", err))
       .finally(() => setIsPastLoading(false));
   }, []);
+
+  const handleDeleteProject = async (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (deletingId === id) return;
+    setDeletingId(id);
+
+    // Optimistically remove from UI
+    setPastProjects((prev) => prev.filter((p) => p.id !== id));
+
+    try {
+      await deleteResearchProject(id);
+    } catch (err) {
+      console.error("Failed to delete project:", err);
+      // Re-fetch to restore state if deletion failed
+      const data = await listResearchProjects().catch(() => []);
+      setPastProjects(data);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -411,15 +438,32 @@ export default function HomePage() {
                         )}
                       </span>
 
-                      {p.created_at && (
-                        <span className="flex items-center gap-1 text-[11px] text-muted-foreground/70">
-                          <Clock className="w-3 h-3" />
-                          {new Date(p.created_at).toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                          })}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {p.created_at && (
+                          <span className="flex items-center gap-1 text-[11px] text-muted-foreground/70">
+                            <Clock className="w-3 h-3" />
+                            {new Date(p.created_at).toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </span>
+                        )}
+
+                        {/* Delete Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteProject(e, p.id)}
+                          title="Delete research session"
+                          aria-label="Delete research session"
+                          className="opacity-70 sm:opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all duration-200 z-10"
+                        >
+                          {deletingId === p.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-destructive" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-2 leading-snug">
