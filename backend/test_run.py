@@ -58,7 +58,7 @@ async def execute_verification_pipeline():
 
         # Step 3: Poll status endpoint until done
         print(f"\n[STEP 3] Polling /api/research/{project_id}/status...")
-        max_poll_time = 180  # seconds
+        max_poll_time = 450  # seconds
         poll_interval = 2.5  # seconds
         start_time = time.time()
         final_status = None

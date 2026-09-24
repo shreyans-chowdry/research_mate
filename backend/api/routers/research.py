@@ -5,7 +5,7 @@ import logging
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Response
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status, Response, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -590,32 +590,159 @@ async def critique_paper_endpoint(
         )
     except Exception as e:
         logger.error(f"Error parsing critique JSON: {e}, raw text: {cleaned}")
-        first_p = papers[0] if papers else None
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate critique analysis. The Gemini API may be unavailable or returned an invalid format: {e}"
+        )
+
+
+@router.post("/{project_id}/critique-paper-upload", response_model=PaperCritiqueResponse)
+async def critique_paper_upload(
+    project_id: str,
+    title: str = Form(...),
+    focus_area: str = Form("comprehensive"),
+    pdf_file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Accepts a PDF file upload, extracts its text content using PyMuPDF,
+    and runs the same critique pipeline as the text-based endpoint.
+    """
+    try:
+        p_uuid = UUID(project_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project UUID format.")
+
+    project = await db.get(Project, p_uuid)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    # Validate file type
+    if not pdf_file.filename or not pdf_file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted. Please upload a .pdf file.")
+
+    # Read and extract text from PDF using PyMuPDF
+    try:
+        import fitz  # PyMuPDF
+
+        pdf_bytes = await pdf_file.read()
+        if len(pdf_bytes) > 50 * 1024 * 1024:  # 50MB limit
+            raise HTTPException(status_code=400, detail="PDF file is too large. Maximum size is 50MB.")
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        extracted_pages = []
+        for page_num in range(min(doc.page_count, 60)):  # Cap at 60 pages
+            page = doc.load_page(page_num)
+            text = page.get_text("text")
+            if text and text.strip():
+                extracted_pages.append(text.strip())
+        doc.close()
+
+        draft_text = "\n\n".join(extracted_pages)
+        if not draft_text or len(draft_text.strip()) < 50:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not extract meaningful text from the PDF. The file may be scanned/image-based."
+            )
+
+        # Truncate to ~15000 chars for LLM context
+        draft_text = draft_text[:15000]
+
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="PyMuPDF (fitz) is not installed. Run: pip install PyMuPDF"
+        )
+    except HTTPException:
+        raise
+    except Exception as pdf_err:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to read PDF file: {pdf_err}"
+        )
+
+    # Now run the same critique logic as the text-based endpoint
+    # Retrieve all papers and gaps for this project
+    papers_stmt = select(Paper).options(selectinload(Paper.analysis)).where(Paper.project_id == p_uuid)
+    papers_res = await db.execute(papers_stmt)
+    papers = papers_res.scalars().all()
+
+    gaps_stmt = select(Gap).where(Gap.project_id == p_uuid)
+    gaps_res = await db.execute(gaps_stmt)
+    gaps = gaps_res.scalars().all()
+
+    papers_context = "\n".join([
+        f"- Paper ID: {p.id} | \"{p.title}\" ({p.year or 'N/A'})\n"
+        f"  Method: {p.analysis.methodology if p.analysis else 'N/A'}\n"
+        f"  Dataset: {p.analysis.dataset if p.analysis else 'N/A'}\n"
+        f"  Limitations: {p.analysis.limitations if p.analysis else 'N/A'}"
+        for p in papers[:8]
+    ])
+
+    gaps_context = "\n".join([
+        f"- Gap: {g.title}: {g.description} (Direction: {g.suggested_direction})"
+        for g in gaps
+    ])
+
+    prompt = (
+        f"You are a top-tier peer reviewer and academic editor reviewing a paper submitted as a PDF.\n\n"
+        f"Project Research Topic: \"{project.topic}\"\n\n"
+        f"Synthesized Research Gaps from State-of-the-Art Literature:\n{gaps_context}\n\n"
+        f"Related Peer-Reviewed Papers in Corpus:\n{papers_context}\n\n"
+        f"Researcher's Submitted Manuscript Details:\n"
+        f"Paper Title: \"{title}\"\n"
+        f"Full Paper Text (extracted from PDF):\n{draft_text}\n\n"
+        f"Task: Evaluate this manuscript critically against the related literature and gaps. Suggest concrete changes.\n"
+        f"Return ONLY valid JSON matching this schema:\n"
+        f"{{\n"
+        f'  "overall_score": 78,\n'
+        f'  "readiness_level": "Solid Draft with Key Revisions Needed",\n'
+        f'  "executive_summary": "string summary evaluating manuscript viability",\n'
+        f'  "gap_alignment": "string describing how well paper addresses known gaps",\n'
+        f'  "methodology_critique": "string critiquing methodology and baselines",\n'
+        f'  "benchmark_suggestions": ["string suggestion 1", "string suggestion 2"],\n'
+        f'  "missing_citations": [\n'
+        f'     {{"paper_id": "{str(papers[0].id) if papers else ""}", "title": "{papers[0].title if papers else "Related Paper"}", "relevance_reason": "why to cite"}}\n'
+        f'  ],\n'
+        f'  "actionable_recommendations": ["recommendation 1", "recommendation 2"],\n'
+        f'  "suggested_changes_markdown": "formatted markdown section with concrete advice"\n'
+        f"}}"
+    )
+
+    llm_resp = call_opus(prompt, json_mode=True)
+    cleaned = extract_json_string(llm_resp)
+
+    try:
+        data = json.loads(cleaned)
+        missing_cites = []
+        for c in data.get("missing_citations", []):
+            if isinstance(c, dict) and "title" in c:
+                missing_cites.append(CitationSuggestion(
+                    paper_id=str(c.get("paper_id", "")),
+                    title=str(c.get("title", "")),
+                    relevance_reason=str(c.get("relevance_reason", "Foundational baseline in related literature."))
+                ))
+        if not missing_cites and papers:
+            missing_cites.append(CitationSuggestion(
+                paper_id=str(papers[0].id),
+                title=papers[0].title,
+                relevance_reason=f"Foundational literature in {project.topic}."
+            ))
+
         return PaperCritiqueResponse(
-            overall_score=76,
-            readiness_level="Solid Draft with Key Revisions Needed",
-            executive_summary=f"The draft for '{req.title}' presents an insightful angle on {project.topic}. While the core intuition is promising, the experimental section needs rigorous baseline anchoring against recent peer-reviewed findings.",
-            gap_alignment=f"The paper addresses components of {gaps[0].title if gaps else 'cross-environment generalizability'}, but should explicitly formulate how its technique overcomes the limitation benchmarks noted in related literature.",
-            methodology_critique="The methodology provides an interesting framework, but requires formal mathematical formulation, ablation studies of key subcomponents, and explicit execution runtime bounds.",
-            benchmark_suggestions=[
-                f"Evaluate on standard academic benchmark datasets used across {project.topic} literature.",
-                "Conduct stress-testing under non-stationary or adversarial distribution shifts.",
-                "Report statistical significance with error bars across at least 5 experimental trials."
-            ],
-            missing_citations=[
-                CitationSuggestion(
-                    paper_id=str(first_p.id) if first_p else "00000000-0000-0000-0000-000000000000",
-                    title=first_p.title if first_p else f"Foundational Literature in {project.topic}",
-                    relevance_reason="Crucial comparative baseline that this paper should explicitly evaluate against."
-                )
-            ] if first_p else [],
-            actionable_recommendations=[
-                "Explicitly differentiate your core contribution in the Introduction with a bulleted list.",
-                "Include a comprehensive comparative baseline table contrasting accuracy, latency, and resource footprint.",
-                "Clarify threat models and operational constraints in the Methodology."
-            ],
-            suggested_changes_markdown=f"### Recommended Revisions for *{req.title}*\n\n"
-                                       f"1. **Positioning**: Directly cite recent {project.topic} literature in Section 2.\n"
-                                       f"2. **Baselines**: Contrast performance on standard benchmark datasets.\n"
-                                       f"3. **Limitations**: Acknowledge failure cases and edge-case boundaries in the Discussion."
+            overall_score=int(data.get("overall_score", 76)),
+            readiness_level=str(data.get("readiness_level", "Solid Draft with Revisions Needed")),
+            executive_summary=str(data.get("executive_summary", "")),
+            gap_alignment=str(data.get("gap_alignment", "")),
+            methodology_critique=str(data.get("methodology_critique", "")),
+            benchmark_suggestions=list(data.get("benchmark_suggestions", [])),
+            missing_citations=missing_cites,
+            actionable_recommendations=list(data.get("actionable_recommendations", [])),
+            suggested_changes_markdown=str(data.get("suggested_changes_markdown", "")),
+        )
+    except Exception as e:
+        logger.error(f"Error parsing PDF critique JSON: {e}, raw text: {cleaned[:300]}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to parse AI critique response. The Gemini API may be rate-limited. Error: {e}"
         )

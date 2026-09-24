@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Sparkles,
   FileText,
@@ -20,6 +20,8 @@ import {
   Loader2,
   HelpCircle,
   Lightbulb,
+  Upload,
+  X,
 } from "lucide-react";
 import {
   critiqueUserPaper,
@@ -50,6 +52,10 @@ export default function PaperCriticTab({
   const [error, setError] = useState<string | null>(null);
   const [critique, setCritique] = useState<PaperCritique | null>(null);
   const [copiedReview, setCopiedReview] = useState(false);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [inputMode, setInputMode] = useState<"text" | "pdf">("text");
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Pre-fill sample draft tailored to this research topic
   const handleLoadSample = () => {
@@ -60,12 +66,37 @@ export default function PaperCriticTab({
       `Methodology Overview:\nWe formulate an empirical evaluation pipeline contrasting our model against standard baselines across synthetic trace workloads. We observe preliminary latency reductions of up to 24% under moderate concurrency regimes, though evaluation under adversarial distribution shifts remains ongoing.\n\n` +
       `Current Limitations:\nOur validation is currently restricted to simulated cluster nodes. We have not yet completed multi-node cross-datacenter stress testing, nor have we integrated certified formal verification proofs.`
     );
+    setPdfFile(null);
+    setInputMode("text");
     setError(null);
+  };
+
+  const handleFileSelect = (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setError("Only PDF files are accepted. Please upload a .pdf file.");
+      return;
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      setError("PDF file is too large. Maximum size is 50MB.");
+      return;
+    }
+    setPdfFile(file);
+    setError(null);
+    setDraftText("");
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileSelect(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !draftText.trim()) return;
+    if (!title.trim()) return;
+    if (inputMode === "text" && !draftText.trim()) return;
+    if (inputMode === "pdf" && !pdfFile) return;
 
     setIsLoading(true);
     setError(null);
@@ -73,8 +104,9 @@ export default function PaperCriticTab({
     try {
       const result = await critiqueUserPaper(projectId, {
         title: title.trim(),
-        draft_text: draftText.trim(),
+        draft_text: inputMode === "text" ? draftText.trim() : "PDF uploaded",
         focus_area: focusArea,
+        pdf_file: inputMode === "pdf" ? (pdfFile ?? undefined) : undefined,
       });
       setCritique(result);
     } catch (err: any) {
@@ -203,25 +235,123 @@ export default function PaperCriticTab({
           </div>
         </div>
 
-        {/* Draft Text / Abstract */}
-        <div className="space-y-1.5">
-          <div className="flex justify-between items-center">
-            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
-              Manuscript Draft / Abstract / Methodology
-            </label>
-            <span className="text-[11px] font-mono text-slate-400">
-              {draftText.length} characters • {draftText.trim().split(/\s+/).filter(Boolean).length} words
-            </span>
-          </div>
-          <textarea
-            required
-            rows={7}
-            value={draftText}
-            onChange={(e) => setDraftText(e.target.value)}
-            placeholder="Paste your paper's abstract, problem formulation, methodology section, or experimental results here..."
-            className="w-full px-3.5 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-[#131826] text-slate-900 dark:text-white placeholder:text-slate-400 text-xs sm:text-sm font-sans leading-relaxed outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-          />
+        {/* Input Mode Toggle */}
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100 dark:bg-[#131826] border border-slate-200 dark:border-slate-800 w-fit">
+          <button
+            type="button"
+            onClick={() => { setInputMode("text"); setPdfFile(null); }}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              inputMode === "text"
+                ? "bg-white dark:bg-[#1e2438] text-indigo-600 dark:text-indigo-400 shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-700"
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5 inline mr-1.5" />
+            Paste Text
+          </button>
+          <button
+            type="button"
+            onClick={() => { setInputMode("pdf"); setDraftText(""); }}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              inputMode === "pdf"
+                ? "bg-white dark:bg-[#1e2438] text-indigo-600 dark:text-indigo-400 shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-700"
+            }`}
+          >
+            <Upload className="w-3.5 h-3.5 inline mr-1.5" />
+            Upload PDF
+          </button>
         </div>
+
+        {/* Draft Text / Abstract — shown in text mode */}
+        {inputMode === "text" && (
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center">
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                Manuscript Draft / Abstract / Methodology
+              </label>
+              <span className="text-[11px] font-mono text-slate-400">
+                {draftText.length} characters • {draftText.trim().split(/\s+/).filter(Boolean).length} words
+              </span>
+            </div>
+            <textarea
+              required={inputMode === "text"}
+              rows={7}
+              value={draftText}
+              onChange={(e) => setDraftText(e.target.value)}
+              placeholder="Paste your paper's abstract, problem formulation, methodology section, or experimental results here..."
+              className="w-full px-3.5 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-[#131826] text-slate-900 dark:text-white placeholder:text-slate-400 text-xs sm:text-sm font-sans leading-relaxed outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+            />
+          </div>
+        )}
+
+        {/* PDF Upload Zone — shown in pdf mode */}
+        {inputMode === "pdf" && (
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+              Upload Research Paper (PDF)
+            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleFileSelect(file);
+              }}
+            />
+
+            {!pdfFile ? (
+              <div
+                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`cursor-pointer flex flex-col items-center justify-center gap-3 py-10 rounded-xl border-2 border-dashed transition-all ${
+                  isDragOver
+                    ? "border-indigo-500 bg-indigo-50/50 dark:bg-indigo-950/20"
+                    : "border-slate-300 dark:border-slate-700 bg-slate-50/30 dark:bg-[#131826] hover:border-indigo-400 hover:bg-indigo-50/20 dark:hover:bg-indigo-950/10"
+                }`}
+              >
+                <div className="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center">
+                  <Upload className="w-6 h-6 text-indigo-500" />
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                    Drop your PDF here or click to browse
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Maximum file size: 50MB • PDF format only
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between p-4 rounded-xl border border-emerald-300 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/20">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                    <FileText className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate max-w-[300px]">
+                      {pdfFile.name}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      {(pdfFile.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setPdfFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                  className="p-1.5 rounded-lg hover:bg-red-100 dark:hover:bg-red-950/30 text-red-500 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Error message */}
         {error && (
@@ -239,7 +369,7 @@ export default function PaperCriticTab({
 
           <button
             type="submit"
-            disabled={isLoading || !title.trim() || !draftText.trim()}
+            disabled={isLoading || !title.trim() || (inputMode === "text" ? !draftText.trim() : !pdfFile)}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm text-white bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-md shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
           >
             {isLoading ? (

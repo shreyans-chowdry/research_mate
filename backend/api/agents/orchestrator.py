@@ -139,21 +139,15 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
     try:
         raw_papers = await asyncio.to_thread(search_papers, queries, year_min=2018, limit_per_query=4)
         if not raw_papers:
-            logger.warning(f"[{project_id}] No papers found from search. Using fallback corpus.")
-            raw_papers = [
-                {
-                    "title": f"Advancements and Methodologies in {state['topic']}",
-                    "authors": ["A. Researcher", "B. Scientist"],
-                    "year": 2024,
-                    "source": "openalex",
-                    "doi": "10.1145/sample.2024",
-                    "pdf_url": "",
-                    "oa_status": True,
-                }
-            ]
+            raise RuntimeError(
+                f"No academic papers found for topic '{state['topic']}'. "
+                "All search APIs (OpenAlex, Semantic Scholar) returned 0 results. "
+                "This may be due to rate limits or overly specific search terms. "
+                "Please try again with a broader or differently worded topic."
+            )
 
-        # Limit papers to top 6 for focused deep analysis
-        selected_papers = raw_papers[:6]
+        # Limit papers to top 4 for focused deep analysis and rate limit pacing
+        selected_papers = raw_papers[:4]
         logger.info(f"[{project_id}] Selected {len(selected_papers)} papers for full text acquisition.")
 
         await update_project_status(
@@ -186,15 +180,22 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
                     raw_text = ""
 
             if not raw_text:
-                # Provide structured abstract fallback so analysis node has rich context
-                raw_text = (
-                    f"Title: {p['title']}\n"
-                    f"Authors: {', '.join(p.get('authors', []))}\n"
-                    f"Publication Year: {p.get('year')}\n"
-                    f"Topic Context: Systematic empirical investigation addressing core challenges, "
-                    f"architectural formulations, experimental benchmark evaluations, and open limitations "
-                    f"in {state['topic']}."
-                )
+                abstract = (p.get("abstract") or "").strip()
+                if abstract:
+                    raw_text = (
+                        f"Title: {p['title']}\n"
+                        f"Authors: {', '.join(p.get('authors', []))}\n"
+                        f"Publication Year: {p.get('year')}\n"
+                        f"Abstract:\n{abstract}"
+                    )
+                else:
+                    raw_text = (
+                        f"Title: {p['title']}\n"
+                        f"Authors: {', '.join(p.get('authors', []))}\n"
+                        f"Publication Year: {p.get('year')}\n"
+                        f"Topic Context: Academic research paper investigating core methods, "
+                        f"experimental results, and limitations in {state['topic']}."
+                    )
             p["raw_text"] = raw_text
 
         # Save papers to PostgreSQL
@@ -276,7 +277,7 @@ async def paper_analysis_agent(state: ResearchGraphState) -> Dict[str, Any]:
                     f'  "results": "The quantitative findings, metrics, and outcomes achieved",\n'
                     f'  "limitations": "The explicit weaknesses, assumptions, or scalability limits",\n'
                     f'  "future_work": "The suggested future directions stated or implied",\n'
-                    f'  "model_used": "gemini-2.5-flash"\n'
+                    f'  "model_used": "gemini-3-flash-preview"\n'
                     f"}}\n"
                     f"Output strictly valid JSON. Do not include markdown or explanations outside the JSON."
                 )
@@ -291,27 +292,47 @@ async def paper_analysis_agent(state: ResearchGraphState) -> Dict[str, Any]:
                     if not isinstance(analysis_data, dict):
                         analysis_data = {}
                 except Exception as json_err:
-                    logger.warning(f"Failed to parse LLM analysis JSON for {p['title']}: {json_err}. Using fallback.")
-                    analysis_data = {
-                        "problem": f"Investigating core performance constraints in {p['title']}.",
-                        "methodology": "Empirical evaluation using machine learning architectures.",
-                        "dataset": "Standard domain benchmarks and telemetry logs.",
-                        "results": "Demonstrated competitive accuracy against baseline models.",
-                        "limitations": "Evaluated primarily in synthetic or constrained settings.",
-                        "future_work": "Validation across broader real-world deployment conditions.",
-                        "model_used": "gemini-2.5-flash",
-                    }
+                    logger.error(f"Failed to parse LLM analysis JSON for {p['title']}: {json_err}. Raw response: {cleaned[:200]}")
+                    raise RuntimeError(
+                        f"LLM returned unparseable analysis for '{p['title']}'. "
+                        f"This is likely due to Gemini API rate limits or malformed response. "
+                        f"Error: {json_err}"
+                    )
+
+                problem = str(analysis_data.get("problem") or "").strip()
+                if not problem:
+                    problem = f"Investigating core theoretical and empirical challenges in {p['title']}."
+
+                methodology = str(analysis_data.get("methodology") or "").strip()
+                if not methodology:
+                    methodology = f"Algorithmic formulation and methodology introduced in {p['title']}."
+
+                dataset = str(analysis_data.get("dataset") or "").strip()
+                if not dataset:
+                    dataset = f"Empirical evaluation benchmarks and experimental settings in {p['title']}."
+
+                results = str(analysis_data.get("results") or "").strip()
+                if not results:
+                    results = f"Performance outcomes and empirical metrics reported for {state['topic']}."
+
+                limitations = str(analysis_data.get("limitations") or "").strip()
+                if not limitations:
+                    limitations = f"Structural constraints and operational assumptions noted in {p['title']}."
+
+                future_work = str(analysis_data.get("future_work") or "").strip()
+                if not future_work:
+                    future_work = f"Proposed architectural improvements and cross-environment extensions in {state['topic']}."
 
                 analysis_record = {
                     "id": str(uuid.uuid4()),
                     "paper_id": p["id"],
-                    "problem": analysis_data.get("problem", f"Investigating challenges in {p['title']}."),
-                    "methodology": analysis_data.get("methodology", "Empirical ML analysis."),
-                    "dataset": analysis_data.get("dataset", "Domain benchmarks."),
-                    "results": analysis_data.get("results", "Demonstrated competitive accuracy."),
-                    "limitations": analysis_data.get("limitations", "Evaluated in limited environments."),
-                    "future_work": analysis_data.get("future_work", "Future validation required."),
-                    "model_used": analysis_data.get("model_used", "gemini-2.5-flash"),
+                    "problem": problem,
+                    "methodology": methodology,
+                    "dataset": dataset,
+                    "results": results,
+                    "limitations": limitations,
+                    "future_work": future_work,
+                    "model_used": str(analysis_data.get("model_used") or "gemini-3-flash-preview"),
                 }
 
                 db_analysis = PaperAnalysis(
@@ -327,6 +348,8 @@ async def paper_analysis_agent(state: ResearchGraphState) -> Dict[str, Any]:
                 )
                 session.add(db_analysis)
                 analyses.append(analysis_record)
+                if idx < len(papers) - 1:
+                    await asyncio.sleep(1.0)
 
             await session.commit()
 

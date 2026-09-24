@@ -2,6 +2,7 @@ import os
 import re
 import time
 import logging
+import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import httpx
@@ -11,6 +12,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 
 OPENALEX_BASE_URL = "https://api.openalex.org/works"
 SEMANTIC_SCHOLAR_BASE_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+EUROPE_PMC_BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+ARXIV_BASE_URL = "https://export.arxiv.org/api/query"
 
 # Polite User-Agents for Academic APIs
 OPENALEX_HEADERS = {
@@ -21,8 +24,17 @@ SEMANTIC_SCHOLAR_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 }
 
-# Cooldown timestamp for S2 rate limits
+EUROPE_PMC_HEADERS = {
+    "User-Agent": "ResearchMate/1.0 (Autonomous Academic Synthesis System; mailto:contact@researchmate.org)"
+}
+
+ARXIV_HEADERS = {
+    "User-Agent": "ResearchMate/1.0 (Preprint Academic Analyzer; mailto:contact@researchmate.org)"
+}
+
+# Cooldown timestamp for API rate limits
 _s2_rate_limited_until: float = 0.0
+_openalex_rate_limited_until: float = 0.0
 
 
 def normalize_doi(doi: Optional[str]) -> str:
@@ -52,53 +64,56 @@ def _extract_arxiv_id(text: Optional[str]) -> Optional[str]:
     return None
 
 
+def _invert_openalex_abstract(inv_index: Optional[Dict[str, List[int]]]) -> str:
+    """Reconstruct human-readable abstract from OpenAlex abstract_inverted_index."""
+    if not isinstance(inv_index, dict) or not inv_index:
+        return ""
+    try:
+        word_positions: List[tuple] = []
+        for word, positions in inv_index.items():
+            if isinstance(positions, list):
+                for pos in positions:
+                    word_positions.append((pos, word))
+        word_positions.sort(key=lambda x: x[0])
+        return " ".join(w for _, w in word_positions)
+    except Exception:
+        return ""
+
+
 def _request_with_retry(
     client: httpx.Client,
     url: str,
     params: Dict[str, Any],
     headers: Dict[str, str],
-    max_retries: int = 1,
+    max_retries: int = 0,
     initial_backoff: float = 0.3,
 ) -> Optional[httpx.Response]:
     """Execute HTTP GET request with fast failure on rate limits and transient errors."""
-    global _s2_rate_limited_until
+    global _s2_rate_limited_until, _openalex_rate_limited_until
 
-    backoff = initial_backoff
-    for attempt in range(max_retries + 1):
-        try:
-            response = client.get(url, params=params, headers=headers)
-            if response.status_code == 200:
-                return response
-            elif response.status_code == 429:
-                if "semanticscholar" in url:
-                    logger.info("Semantic Scholar free-tier 429 rate limit hit. Fast-skipping and activating 60s cooldown.")
-                    _s2_rate_limited_until = time.time() + 60.0
-                    return None
-                if attempt < max_retries:
-                    time.sleep(backoff)
-                    backoff *= 2.0
-                else:
-                    return None
-            elif 500 <= response.status_code < 600:
-                if attempt < max_retries:
-                    time.sleep(backoff)
-                    backoff *= 2.0
-                else:
-                    return None
-            else:
-                logger.warning(f"Request failed on {url} with status {response.status_code}")
-                return None
-        except (httpx.TimeoutException, httpx.NetworkError) as err:
-            if attempt < max_retries:
-                time.sleep(backoff)
-                backoff *= 2.0
-            else:
-                logger.warning(f"Network timeout/error on {url}: {err}")
-                return None
-        except Exception as e:
-            logger.error(f"Unexpected error querying {url}: {e}")
+    try:
+        response = client.get(url, params=params, headers=headers)
+        if response.status_code == 200:
+            return response
+        elif response.status_code == 429:
+            if "semanticscholar" in url:
+                logger.info("Semantic Scholar free-tier 429 rate limit hit. Fast-skipping and activating 60s cooldown.")
+                _s2_rate_limited_until = time.time() + 60.0
+            elif "openalex" in url:
+                logger.info("OpenAlex 429 rate limit hit. Fast-skipping and activating 120s cooldown.")
+                _openalex_rate_limited_until = time.time() + 120.0
             return None
-    return None
+        elif 500 <= response.status_code < 600:
+            return None
+        else:
+            logger.warning(f"Request failed on {url} with status {response.status_code}")
+            return None
+    except (httpx.TimeoutException, httpx.NetworkError) as err:
+        logger.warning(f"Network timeout/error on {url}: {err}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error querying {url}: {e}")
+        return None
 
 
 def _query_openalex(
@@ -107,11 +122,16 @@ def _query_openalex(
     year_min: int,
     limit: int,
 ) -> List[Dict[str, Any]]:
-    """Query OpenAlex API and return normalized paper dictionaries."""
+    """Query OpenAlex API and return normalized paper dictionaries with reconstructed abstracts."""
+    global _openalex_rate_limited_until
+
+    if time.time() < _openalex_rate_limited_until:
+        return []
     params = {
         "search": query,
         "filter": f"from_publication_date:{year_min}-01-01",
         "per-page": limit,
+        "mailto": "team@researchmate.ai",
     }
 
     resp = _request_with_retry(client, OPENALEX_BASE_URL, params, OPENALEX_HEADERS)
@@ -171,6 +191,8 @@ def _query_openalex(
             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
             oa_status = True
 
+        abstract = _invert_openalex_abstract(item.get("abstract_inverted_index"))
+
         papers.append(
             {
                 "title": title.strip(),
@@ -180,6 +202,7 @@ def _query_openalex(
                 "doi": doi,
                 "pdf_url": pdf_url or "",
                 "oa_status": oa_status,
+                "abstract": abstract,
             }
         )
 
@@ -196,14 +219,13 @@ def _query_semantic_scholar(
     global _s2_rate_limited_until
 
     if time.time() < _s2_rate_limited_until:
-        logger.info(f"Skipping Semantic Scholar query '{query}' due to active rate limit cooldown.")
         return []
 
     params = {
         "query": query,
         "year": f"{year_min}-",
         "limit": limit,
-        "fields": "title,authors,year,externalIds,openAccessPdf,url",
+        "fields": "title,authors,year,abstract,externalIds,openAccessPdf,url",
     }
 
     headers = dict(SEMANTIC_SCHOLAR_HEADERS)
@@ -245,6 +267,8 @@ def _query_semantic_scholar(
             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
             oa_status = True
 
+        abstract = item.get("abstract") or ""
+
         papers.append(
             {
                 "title": title.strip(),
@@ -254,8 +278,159 @@ def _query_semantic_scholar(
                 "doi": doi,
                 "pdf_url": pdf_url,
                 "oa_status": oa_status,
+                "abstract": abstract,
             }
         )
+
+    return papers
+
+
+def _query_europe_pmc(
+    client: httpx.Client,
+    query: str,
+    year_min: int,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """Query Europe PMC API for peer-reviewed life sciences and interdisciplinary literature."""
+    clean_q = re.sub(r"[^\w\s]", " ", query).strip()
+    if not clean_q:
+        return []
+
+    params = {
+        "query": f"{clean_q} (PUB_YEAR:[{year_min} TO 2026])",
+        "format": "json",
+        "pageSize": limit,
+        "resultType": "core",
+    }
+
+    resp = _request_with_retry(client, EUROPE_PMC_BASE_URL, params, EUROPE_PMC_HEADERS)
+    if not resp:
+        return []
+
+    papers: List[Dict[str, Any]] = []
+    try:
+        data = resp.json()
+        results = data.get("resultList", {}).get("result", [])
+        for item in results:
+            title = item.get("title")
+            if not title:
+                continue
+            title = re.sub(r"<[^>]+>", "", title).strip()
+
+            authors_str = item.get("authorString", "")
+            authors = [a.strip() for a in authors_str.split(",") if a.strip()][:5]
+
+            year = item.get("pubYear")
+            try:
+                year = int(year) if year else None
+            except ValueError:
+                year = None
+
+            doi = normalize_doi(item.get("doi"))
+            abstract = re.sub(r"<[^>]+>", "", item.get("abstractText") or "").strip()
+
+            oa_status = item.get("isOpenAccess") == "Y"
+            pdf_url = ""
+            full_text_list = item.get("fullTextUrlList", {}).get("fullTextUrl", [])
+            if isinstance(full_text_list, list):
+                for ft in full_text_list:
+                    if ft.get("documentStyle") == "pdf":
+                        pdf_url = ft.get("url", "")
+                        oa_status = True
+                        break
+
+            papers.append(
+                {
+                    "title": title,
+                    "authors": authors,
+                    "year": year,
+                    "source": "europe_pmc",
+                    "doi": doi,
+                    "pdf_url": pdf_url,
+                    "oa_status": oa_status,
+                    "abstract": abstract,
+                }
+            )
+    except Exception as e:
+        logger.warning(f"Failed to parse Europe PMC response for '{query}': {e}")
+
+    return papers
+
+
+def _query_arxiv(
+    client: httpx.Client,
+    query: str,
+    year_min: int,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """Query ArXiv API for cutting-edge preprints with guaranteed open-access fulltext."""
+    clean_q = re.sub(r"[^\w\s]", " ", query).strip()
+    if not clean_q:
+        return []
+
+    params = {
+        "search_query": f"all:{clean_q}",
+        "start": 0,
+        "max_results": limit,
+        "sortBy": "relevance",
+        "sortOrder": "descending",
+    }
+
+    resp = _request_with_retry(client, ARXIV_BASE_URL, params, ARXIV_HEADERS)
+    if not resp:
+        return []
+
+    papers: List[Dict[str, Any]] = []
+    try:
+        root = ET.fromstring(resp.text)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        for entry in root.findall("atom:entry", ns):
+            title_elem = entry.find("atom:title", ns)
+            if title_elem is None or not title_elem.text:
+                continue
+            title = re.sub(r"\s+", " ", title_elem.text).strip()
+
+            summary_elem = entry.find("atom:summary", ns)
+            abstract = re.sub(r"\s+", " ", summary_elem.text).strip() if summary_elem is not None and summary_elem.text else ""
+
+            published_elem = entry.find("atom:published", ns)
+            year = int(published_elem.text[:4]) if published_elem is not None and published_elem.text else None
+
+            if year and year < year_min:
+                continue
+
+            authors = []
+            for a in entry.findall("atom:author", ns):
+                name_elem = a.find("atom:name", ns)
+                if name_elem is not None and name_elem.text:
+                    authors.append(name_elem.text.strip())
+
+            pdf_url = ""
+            for link in entry.findall("atom:link", ns):
+                if link.attrib.get("title") == "pdf" or link.attrib.get("type") == "application/pdf":
+                    pdf_url = link.attrib.get("href", "")
+                    break
+
+            if not pdf_url:
+                id_elem = entry.find("atom:id", ns)
+                if id_elem is not None and id_elem.text:
+                    arxiv_id = id_elem.text.split("/abs/")[-1]
+                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+
+            papers.append(
+                {
+                    "title": title,
+                    "authors": authors,
+                    "year": year,
+                    "source": "arxiv",
+                    "doi": "",
+                    "pdf_url": pdf_url,
+                    "oa_status": True,
+                    "abstract": abstract,
+                }
+            )
+    except Exception as e:
+        logger.warning(f"Error parsing ArXiv feed for query '{query}': {e}")
 
     return papers
 
@@ -266,8 +441,8 @@ def search_papers(
     limit_per_query: int = 6,
 ) -> List[Dict[str, Any]]:
     """
-    Search academic literature across OpenAlex and Semantic Scholar APIs.
-    Deduplicates results across multiple queries and normalizes metadata format.
+    Search academic literature across OpenAlex, Semantic Scholar, Europe PMC, and ArXiv APIs.
+    Deduplicates results across multiple queries and extracts rich abstracts and open-access PDFs.
 
     Args:
         queries: List of search query strings.
@@ -276,7 +451,7 @@ def search_papers(
 
     Returns:
         List of normalized paper dictionaries:
-        `[{"title": str, "authors": list[str], "year": int, "source": str, "doi": str, "pdf_url": str, "oa_status": bool}]`
+        `[{"title": str, "authors": list[str], "year": int, "source": str, "doi": str, "pdf_url": str, "oa_status": bool, "abstract": str}]`
     """
     dedup_map: Dict[str, Dict[str, Any]] = {}
 
@@ -285,18 +460,15 @@ def search_papers(
         valid_queries = ["research literature"]
 
     def _fetch_single_query(q: str, client: httpx.Client) -> List[Dict[str, Any]]:
-        logger.info(f"Querying OpenAlex for: '{q}'")
+        # Query providers
         oa_papers = _query_openalex(client, q, year_min, limit_per_query)
-
-        s2_papers = []
-        if time.time() >= _s2_rate_limited_until:
-            logger.info(f"Querying Semantic Scholar for: '{q}'")
-            s2_papers = _query_semantic_scholar(client, q, year_min, limit_per_query)
-
-        return oa_papers + s2_papers
+        s2_papers = _query_semantic_scholar(client, q, year_min, limit_per_query)
+        epmc_papers = _query_europe_pmc(client, q, year_min, limit_per_query)
+        arxiv_papers = _query_arxiv(client, q, year_min, limit_per_query)
+        return oa_papers + s2_papers + epmc_papers + arxiv_papers
 
     combined_batches: List[Dict[str, Any]] = []
-    with httpx.Client(timeout=6.0, follow_redirects=True) as client:
+    with httpx.Client(timeout=8.0, follow_redirects=True) as client:
         with ThreadPoolExecutor(max_workers=min(len(valid_queries), 4)) as executor:
             futures = [executor.submit(_fetch_single_query, q, client) for q in valid_queries]
             for f in as_completed(futures):
@@ -322,15 +494,16 @@ def search_papers(
             # New paper record
             primary_key = doi_key or title_key
             dedup_map[primary_key] = paper
-            # Also register title key so future matches find it
             if doi_key:
                 dedup_map[title_key] = paper
         else:
-            # Merge complementary fields (e.g. PDF link, OA status, authors)
+            # Merge complementary fields
             existing = dedup_map[match_key]
             if not existing.get("pdf_url") and paper.get("pdf_url"):
                 existing["pdf_url"] = paper["pdf_url"]
                 existing["oa_status"] = True
+            if not existing.get("abstract") and paper.get("abstract"):
+                existing["abstract"] = paper["abstract"]
             if not existing.get("authors") and paper.get("authors"):
                 existing["authors"] = paper["authors"]
             if not existing.get("year") and paper.get("year"):
@@ -349,29 +522,10 @@ def search_papers(
             unique_papers.append(p)
 
     if not unique_papers:
-        logger.warning("External academic APIs returned 0 results (rate limited or 503). Providing verified fallback corpus.")
-        first_q = queries[0] if queries else "Machine Learning"
-        unique_papers = [
-            {
-                "title": f"Recent Advances and Methodological Frameworks in {first_q.title()}",
-                "authors": ["A. Chen", "M. K. Patel", "J. Rodriguez"],
-                "year": 2023,
-                "source": "openalex",
-                "doi": "10.1145/3543507.3583301",
-                "pdf_url": "https://arxiv.org/pdf/2104.07409.pdf",
-                "oa_status": True,
-            },
-            {
-                "title": f"Empirical Evaluation and Benchmarks for {first_q.title()}",
-                "authors": ["L. Zhang", "S. Gupta"],
-                "year": 2022,
-                "source": "semanticscholar",
-                "doi": "10.1109/access.2022.3189912",
-                "pdf_url": "https://arxiv.org/pdf/2104.07409.pdf",
-                "oa_status": True,
-            },
-        ]
+        logger.warning(
+            "External academic APIs returned 0 results for all queries. "
+            "No fallback papers will be injected — only real results are used."
+        )
 
     logger.info(f"Retrieved {len(unique_papers)} unique papers across {len(queries)} queries.")
     return unique_papers
-

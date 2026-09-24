@@ -22,10 +22,12 @@ else:
 
 # Read keys strictly from GOOGLE_API_KEY and ANTHROPIC_API_KEY
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 
-GEMINI_PRIMARY_MODEL = "gemini-3.5-flash"
-GEMINI_FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-flash-latest"]
+GEMINI_PRIMARY_MODEL = "gemini-3-flash-preview"
+GEMINI_FALLBACK_MODELS = [
+    "gemma-4-26b-a4b-it",
+    "gemma-4-31b-it",
+]
 
 
 def extract_json_string(text: str) -> str:
@@ -58,158 +60,25 @@ def extract_json_string(text: str) -> str:
     return text
 
 
-def _extract_topic_and_title(prompt: str) -> tuple[str, str]:
-    """Helper to dynamically extract research topic and paper title from LLM prompts."""
-    topic_match = re.search(r'(?:topic|topic is:)\s*["\']?([^"\'\n\r]{3,120})["\']?', prompt, re.IGNORECASE)
-    topic = topic_match.group(1).strip() if topic_match else "Advanced Machine Learning & AI"
-
-    title_match = re.search(r'Paper Title:\s*["\']?([^"\'\n\r]{3,150})["\']?', prompt, re.IGNORECASE)
-    title = title_match.group(1).strip() if title_match else f"Recent Advancements in {topic}"
-
-    return topic, title
-
-
-def _heuristic_fallback_response(prompt: str, json_mode: bool = False, system: str = "") -> str:
-    """
-    Intelligent, topic-aware domain fallback generator used if an external LLM request fails.
-    Dynamically adapts to the user's actual research topic and paper metadata.
-    """
-    topic, title = _extract_topic_and_title(prompt)
-    lower_prompt = prompt.lower()
-
-    if json_mode or "json" in lower_prompt:
-        # Check if generating search queries
-        if "generate between 3 and 5" in lower_prompt or ("query" in lower_prompt and "search" in lower_prompt):
-            return json.dumps([
-                f"{topic} state of the art methodologies",
-                f"{topic} empirical benchmark performance evaluation",
-                f"{topic} architectural trade-offs and limitations",
-                f"{topic} algorithmic scalability and applications"
-            ])
-
-        # Check if paper extraction (extracting 6 dimensions)
-        if "extract the following 6 dimensions" in lower_prompt or "paper content excerpt" in lower_prompt:
-            return json.dumps({
-                "problem": f"Investigating structural constraints, algorithmic trade-offs, and reliability challenges in {topic}.",
-                "methodology": f"Proposed a specialized empirical framework evaluating algorithmic architectures and comparative baselines.",
-                "dataset": f"Evaluated against standard domain benchmark datasets and peer-reviewed experimental traces.",
-                "results": "Achieved significant improvements in primary performance metrics over competitive baseline models.",
-                "limitations": f"Current validation is primarily restricted to controlled testing conditions and specific baseline configurations.",
-                "future_work": f"Explore end-to-end field validation, transferability across heterogeneous environments, and deployment efficiency in {topic}.",
-                "model_used": "gemini-3.6-flash"
-            })
-
-        # Check if gap synthesis
-        if "unaddressed research gaps" in lower_prompt or "gap" in lower_prompt or "suggested_direction" in lower_prompt:
-            # Extract any paper IDs from prompt if available
-            paper_ids = re.findall(r'Paper ID:\s*([a-f0-9\-]{36})', prompt)
-            sup_1 = [paper_ids[0]] if paper_ids else []
-            sup_2 = [paper_ids[1]] if len(paper_ids) > 1 else sup_1
-
-            return json.dumps([
-                {
-                    "title": f"Cross-Environment Generalizability in {topic}",
-                    "description": f"Current literature predominantly optimizes for isolated benchmark conditions, leading to substantial performance degradation when evaluated under non-stationary real-world distributions.",
-                    "suggested_direction": f"Formulate robust adaptive training frameworks and standardized stress-testing protocols tailored to {topic}.",
-                    "supporting_paper_ids": sup_1
-                },
-                {
-                    "title": f"Latency and Resource Bottlenecks in Scaled {topic} Deployments",
-                    "description": f"Advanced models yield high nominal accuracy at the cost of prohibitive computational and memory overhead, limiting real-time deployment feasibility.",
-                    "suggested_direction": f"Investigate algorithmic distillation, quantization-aware training, and hardware-accelerated inference pipelines for {topic}.",
-                    "supporting_paper_ids": sup_2
-                }
-            ])
-
-        # Check if paper critique / manuscript review
-        if "critique" in lower_prompt or "manuscript" in lower_prompt or "suggest concrete changes" in lower_prompt:
-            paper_ids = re.findall(r'Paper ID:\s*([a-f0-9\-]{36})', prompt)
-            pid = paper_ids[0] if paper_ids else "00000000-0000-0000-0000-000000000000"
-            return json.dumps({
-                "overall_score": 78,
-                "readiness_level": "Solid Draft with Key Revisions Needed",
-                "executive_summary": f"The submitted manuscript presents a promising algorithmic formulation addressing core challenges in {topic}. While the theoretical intuition is sound, the empirical validation requires rigorous baseline comparisons and clear positioning against state-of-the-art literature gaps.",
-                "gap_alignment": f"The draft partially addresses cross-environment scalability, but needs to explicitly formalize how its methodology overcomes distribution shifts identified in recent peer-reviewed literature.",
-                "methodology_critique": "The core proposed architecture is innovative, but the draft lacks explicit computational complexity bounds, formal ablation studies, and discussion of failure modes under adversarial conditions.",
-                "benchmark_suggestions": [
-                    f"Evaluate against standard open-access benchmark suites commonly used in {topic} research.",
-                    "Include latency vs. throughput trade-off curves under varying operational batch sizes.",
-                    "Perform 5-fold cross-validation with statistical significance tests (p < 0.05) against competitive baselines."
-                ],
-                "missing_citations": [
-                    {
-                        "paper_id": pid,
-                        "title": f"Recent Empirical Foundations in {topic}",
-                        "relevance_reason": "Foundational literature in this corpus that should be explicitly evaluated against in the Related Work section."
-                    }
-                ],
-                "actionable_recommendations": [
-                    "Articulate the specific threat model and operational boundary conditions in Section 1.",
-                    "Add an explicit comparative table contrasting accuracy, memory footprint, and inference time against baselines.",
-                    "Expand the Discussion section to address real-world deployment challenges and failure boundaries."
-                ],
-                "suggested_changes_markdown": f"### Priority Manuscript Enhancements for *{title}*\n\n1. **Abstract Restructuring**: Quantify primary empirical improvements over competitive baselines in the penultimate sentence.\n2. **Literature Gap Positioning**: Contrast your technique directly with synthesized literature gaps in {topic}, proving where prior approaches degrade.\n3. **Ablation Study**: Introduce a dedicated ablation subsection demonstrating the incremental performance benefit of each architectural component."
-            })
-
-        # Default generic JSON object when json_mode=True
-        return json.dumps({"status": "ok", "agent": "gemini-3.6-flash", "topic": topic})
-
-    # Comparison Synthesis
-    if "dimension" in lower_prompt or "comparison" in lower_prompt:
-        if "methodology" in lower_prompt:
-            return (
-                f"Across the analyzed studies in {topic}, methodologies exhibit a clear transition from classical baseline "
-                f"architectures to modern attention-augmented and hybrid formulations. While complex architectures demonstrate "
-                f"superior feature representation, simpler ensembles retain computational efficiency and interpretability advantages."
-            )
-        elif "dataset" in lower_prompt:
-            return (
-                f"The benchmark landscape in {topic} shows considerable heterogeneity. A significant portion of studies rely on "
-                f"standardized academic corpora, whereas recent investigations emphasize domain-specific or simulated real-time "
-                f"telemetry to better capture deployment challenges."
-            )
-        else:
-            return (
-                f"Empirical results across the evaluated literature consistently show competitive performance improvements in "
-                f"controlled evaluation settings. However, cross-study comparisons highlight persistent variance in evaluation metrics, "
-                f"underscoring the critical need for unified evaluation benchmarks in {topic}."
-            )
-
-    # Markdown Report Generation
-    return (
-        f"# Executive Academic Synthesis: Automated Literature Gap Analysis on {topic}\n\n"
-        f"## 1. Executive Summary\n"
-        f"This systematic literature review synthesizes recent advancements, empirical methodologies, and structural limitations "
-        f"across peer-reviewed studies in **{topic}**. The evaluation reveals substantial progress in core algorithmic techniques "
-        f"alongside critical open frontiers in robustness and real-world scalability.\n\n"
-        f"## 2. Methodological & Benchmark Landscape\n"
-        f"- **Architectural Paradigms**: Shift from static heuristics toward adaptive deep architectures.\n"
-        f"- **Experimental Datasets**: Increasing transition from synthetic benchmarks toward realistic domain evaluations.\n\n"
-        f"## 3. Synthesized Research Gaps & Evidence Trails\n"
-        f"- **Gap 1**: Cross-environment generalizability and robustness under distribution shifts.\n"
-        f"- **Gap 2**: Computational overhead and latency constraints in resource-bounded deployment settings.\n\n"
-        f"## 4. Strategic Future Research Roadmap\n"
-        f"Future investigations should prioritize reproducible open-access benchmarks, certified adversarial robustness, "
-        f"and hardware-efficient deployment methodologies for **{topic}**."
-    )
-
-
 def call_flash(prompt: str, json_mode: bool = False) -> str:
     """
-    Invokes Google Gemini (gemini-3.6-flash) for fast structured reasoning or extraction.
+    Invokes Google Gemini / Gemma for fast structured reasoning or extraction.
+    Raises an error if no API key is configured or all models fail.
 
     Args:
         prompt: User prompt string.
         json_mode: Whether to enforce JSON formatted output.
 
     Returns:
-        String response from Gemini (or extracted JSON string when json_mode=True).
+        String response from Gemini/Gemma (or extracted JSON string when json_mode=True).
     """
     api_key = os.getenv("GOOGLE_API_KEY", "").strip() or GOOGLE_API_KEY
 
     if not api_key:
-        logger.info("GOOGLE_API_KEY not configured. Generating high-fidelity domain response.")
-        return _heuristic_fallback_response(prompt, json_mode=json_mode)
+        raise RuntimeError(
+            "GOOGLE_API_KEY is not configured. Please set your Google Gemini API key in the .env file. "
+            "No dummy/fallback data will be generated."
+        )
 
     try:
         from google import genai
@@ -217,45 +86,86 @@ def call_flash(prompt: str, json_mode: bool = False) -> str:
 
         client = genai.Client(api_key=api_key)
 
-        config_args = {}
-        if json_mode:
-            config_args["response_mime_type"] = "application/json"
-
-        config = types.GenerateContentConfig(**config_args) if config_args else None
-
         # Attempt with primary model, then fallbacks
         candidate_models = [GEMINI_PRIMARY_MODEL] + GEMINI_FALLBACK_MODELS
         last_error = None
 
         for model_name in candidate_models:
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                    config=config,
-                )
-                if response and response.text:
-                    raw_text = response.text.strip()
-                    if json_mode:
-                        return extract_json_string(raw_text)
-                    return raw_text
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Gemini model {model_name} failed: {e}. Trying fallback...")
-                continue
+            config_args: Dict[str, Any] = {}
+            if "gemini-3" in model_name:
+                config_args["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+            if json_mode and not model_name.startswith("gemma"):
+                config_args["response_mime_type"] = "application/json"
 
-        logger.error(f"All Gemini models failed. Error: {last_error}")
-        return _heuristic_fallback_response(prompt, json_mode=json_mode)
+            config = types.GenerateContentConfig(**config_args) if config_args else None
 
-    except Exception as e:
-        logger.error(f"Unexpected error in call_flash: {e}")
-        return _heuristic_fallback_response(prompt, json_mode=json_mode)
+            effective_prompt = prompt
+            if json_mode and model_name.startswith("gemma") and "json" not in prompt.lower():
+                effective_prompt += "\n\nRespond ONLY with a valid JSON object or array. Do not include markdown codeblocks or text outside the JSON."
+
+            for attempt in range(3):
+                try:
+                    logger.info(f"Invoking LLM ({model_name}, attempt {attempt + 1}/3, json={json_mode})...")
+                    if config:
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=effective_prompt,
+                            config=config,
+                        )
+                    else:
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=effective_prompt,
+                        )
+
+                    if response and response.text:
+                        raw_text = response.text.strip()
+                        logger.info(f"LLM ({model_name}) succeeded with {len(raw_text)} chars.")
+                        if json_mode:
+                            return extract_json_string(raw_text)
+                        return raw_text
+                except Exception as e:
+                    last_error = e
+                    err_str = str(e)
+                    if "503" in err_str or "UNAVAILABLE" in err_str or "500" in err_str or "INTERNAL" in err_str:
+                        sleep_time = 1.5 * (attempt + 1)
+                        logger.warning(
+                            f"Model {model_name} transient error ({err_str[:60]}). Retrying in {sleep_time}s..."
+                        )
+                        import time
+                        time.sleep(sleep_time)
+                        continue
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        if "GenerateRequestsPerDay" in err_str or "free_tier_requests" in err_str:
+                            logger.warning(f"Model {model_name} reached daily limit. Trying fallback model...")
+                            break
+                        sleep_time = 3.0 * (attempt + 1)
+                        logger.warning(
+                            f"Rate limit on {model_name} (attempt {attempt + 1}/3). "
+                            f"Waiting {sleep_time}s before retry..."
+                        )
+                        import time
+                        time.sleep(sleep_time)
+                        continue
+                    logger.warning(f"LLM model {model_name} failed: {e}. Trying fallback...")
+                    break
+
+        raise RuntimeError(
+            f"All Gemini models failed. Last error: {last_error}. "
+            "This may be due to API rate limits on the free tier. Please wait a moment and retry."
+        )
+
+    except ImportError:
+        raise RuntimeError(
+            "The 'google-genai' package is not installed. "
+            "Please install it with: pip install google-genai"
+        )
 
 
 def call_opus(prompt: str, system: str = "", json_mode: bool = False) -> str:
     """
     Invokes the reasoning LLM for comparative synthesis, gap derivation, and report composition.
-    Per project constraint (DO NOT USE ANTHROPIC API KEY), this seamlessly routes to Google Gemini.
+    Routes to Google Gemini.
 
     Args:
         prompt: User prompt string.
@@ -268,4 +178,3 @@ def call_opus(prompt: str, system: str = "", json_mode: bool = False) -> str:
     full_prompt = f"System Instructions:\n{system}\n\nTask:\n{prompt}" if system else prompt
     effective_json = json_mode or ("json" in full_prompt.lower() and "array" in full_prompt.lower())
     return call_flash(full_prompt, json_mode=effective_json)
-
