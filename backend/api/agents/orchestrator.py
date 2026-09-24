@@ -186,17 +186,18 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
                 paper_id = uuid.uuid4()
                 p["id"] = str(paper_id)
 
+                clean_raw = (p.get("raw_text") or "").replace("\x00", "")
                 db_paper = Paper(
                     id=paper_id,
                     project_id=p_uuid,
-                    title=p["title"],
-                    authors=p.get("authors") or [],
+                    title=p["title"].replace("\x00", ""),
+                    authors=[a.replace("\x00", "") for a in (p.get("authors") or [])],
                     year=p.get("year"),
                     source=p.get("source"),
                     doi=p.get("doi") or None,
                     pdf_url=p.get("pdf_url") or None,
                     oa_status=bool(p.get("oa_status", False)),
-                    raw_text=p.get("raw_text"),
+                    raw_text=clean_raw,
                 )
                 session.add(db_paper)
                 saved_papers.append(p)

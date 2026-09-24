@@ -114,8 +114,8 @@ def download_and_extract_pdf(pdf_url: str) -> str:
             raw_full_text = "\n\n".join(extracted_pages)
             logger.info(f"Successfully extracted {len(raw_full_text)} characters across {len(extracted_pages)} pages.")
 
-            # Heuristically strip references
-            processed_text = strip_reference_list(raw_full_text)
+            # Heuristically strip references and sanitize null bytes for PostgreSQL UTF-8 compliance
+            processed_text = strip_reference_list(raw_full_text).replace("\x00", "")
             return processed_text
 
     except httpx.TimeoutException:
