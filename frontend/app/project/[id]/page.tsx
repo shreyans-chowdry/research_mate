@@ -8,6 +8,7 @@ import {
   getResearchComparison,
   getResearchGaps,
   getResearchReport,
+  retryResearch,
   ResearchStatus,
   PaperWithAnalysis,
   ComparisonDimension,
@@ -146,13 +147,25 @@ export default function ProjectPage() {
     };
   }, [projectId, fetchStatus]);
 
-  // Elapsed time tracker
+  // Elapsed time tracker: accurately calculates duration from backend created_at timestamp
   useEffect(() => {
     const isFinished = status?.status === "done" || status?.status === "error";
 
+    // Immediately compute and sync elapsed seconds from created_at
+    if (status?.created_at) {
+      const startMs = new Date(status.created_at).getTime();
+      const initial = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+      setElapsedSeconds(initial);
+    }
+
     if (!isFinished) {
       timerRef.current = setInterval(() => {
-        setElapsedSeconds((prev) => prev + 1);
+        if (status?.created_at) {
+          const startMs = new Date(status.created_at).getTime();
+          setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startMs) / 1000)));
+        } else {
+          setElapsedSeconds((prev) => prev + 1);
+        }
       }, 1000);
     }
 
@@ -162,28 +175,35 @@ export default function ProjectPage() {
         timerRef.current = null;
       }
     };
-  }, [status?.status]);
+  }, [status?.status, status?.created_at]);
 
-  // Manual retry action
-  const handleRetry = useCallback(() => {
+  // Manual retry / re-run action: calls backend retry endpoint to resume or re-run pipeline
+  const handleRetry = useCallback(async () => {
+    if (!projectId) return;
     setError(null);
     setIsLoading(true);
-    fetchStatus().then((data) => {
-      if (data && ACTIVE_STATUSES.has(data.status)) {
-        if (!pollIntervalRef.current) {
-          pollIntervalRef.current = setInterval(async () => {
-            const latest = await fetchStatus();
-            if (latest && !ACTIVE_STATUSES.has(latest.status)) {
-              if (pollIntervalRef.current) {
-                clearInterval(pollIntervalRef.current);
-                pollIntervalRef.current = null;
-              }
+
+    try {
+      await retryResearch(projectId);
+    } catch (err) {
+      console.warn("Could not dispatch backend retry endpoint:", err);
+    }
+
+    const data = await fetchStatus();
+    if (data && ACTIVE_STATUSES.has(data.status)) {
+      if (!pollIntervalRef.current) {
+        pollIntervalRef.current = setInterval(async () => {
+          const latest = await fetchStatus();
+          if (latest && !ACTIVE_STATUSES.has(latest.status)) {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
             }
-          }, 2500);
-        }
+          }
+        }, 2500);
       }
-    });
-  }, [fetchStatus]);
+    }
+  }, [projectId, fetchStatus]);
 
   const isDone = status?.status === "done";
 

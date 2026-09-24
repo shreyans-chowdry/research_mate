@@ -71,7 +71,7 @@ def download_and_extract_pdf(pdf_url: str) -> str:
 
     try:
         with httpx.Client(
-            timeout=httpx.Timeout(8.0, connect=3.0, read=5.0),
+            timeout=httpx.Timeout(3.5, connect=2.0, read=2.5),
             headers=BROWSER_HEADERS,
             follow_redirects=True,
         ) as client:

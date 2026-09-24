@@ -3,6 +3,7 @@ import re
 import time
 import logging
 from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -56,10 +57,10 @@ def _request_with_retry(
     url: str,
     params: Dict[str, Any],
     headers: Dict[str, str],
-    max_retries: int = 2,
-    initial_backoff: float = 0.8,
+    max_retries: int = 1,
+    initial_backoff: float = 0.3,
 ) -> Optional[httpx.Response]:
-    """Execute HTTP GET request with exponential backoff on HTTP 429 and transient errors."""
+    """Execute HTTP GET request with fast failure on rate limits and transient errors."""
     global _s2_rate_limited_until
 
     backoff = initial_backoff
@@ -69,37 +70,30 @@ def _request_with_retry(
             if response.status_code == 200:
                 return response
             elif response.status_code == 429:
+                if "semanticscholar" in url:
+                    logger.info("Semantic Scholar free-tier 429 rate limit hit. Fast-skipping and activating 60s cooldown.")
+                    _s2_rate_limited_until = time.time() + 60.0
+                    return None
                 if attempt < max_retries:
-                    logger.warning(
-                        f"Rate limit 429 on {url} (attempt {attempt + 1}/{max_retries + 1}). "
-                        f"Retrying in {backoff:.1f}s..."
-                    )
                     time.sleep(backoff)
                     backoff *= 2.0
                 else:
-                    logger.warning(f"Exceeded max retries for rate limit 429 on {url}.")
-                    if "semanticscholar" in url:
-                        _s2_rate_limited_until = time.time() + 45.0  # Cooldown S2 for 45s
                     return None
             elif 500 <= response.status_code < 600:
                 if attempt < max_retries:
-                    logger.warning(
-                        f"Server error {response.status_code} on {url}. Retrying in {backoff:.1f}s..."
-                    )
                     time.sleep(backoff)
                     backoff *= 2.0
                 else:
                     return None
             else:
-                logger.warning(f"Request failed on {url} with status {response.status_code}: {response.text[:120]}")
+                logger.warning(f"Request failed on {url} with status {response.status_code}")
                 return None
         except (httpx.TimeoutException, httpx.NetworkError) as err:
             if attempt < max_retries:
-                logger.warning(f"Network error on {url}: {err}. Retrying in {backoff:.1f}s...")
                 time.sleep(backoff)
                 backoff *= 2.0
             else:
-                logger.error(f"Network failure on {url} after {max_retries} retries: {err}")
+                logger.warning(f"Network timeout/error on {url}: {err}")
                 return None
         except Exception as e:
             logger.error(f"Unexpected error querying {url}: {e}")
@@ -286,50 +280,63 @@ def search_papers(
     """
     dedup_map: Dict[str, Dict[str, Any]] = {}
 
-    with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-        for query in queries:
-            cleaned_query = query.strip()
-            if not cleaned_query:
-                continue
+    valid_queries = [q.strip() for q in queries if q.strip()]
+    if not valid_queries:
+        valid_queries = ["research literature"]
 
-            logger.info(f"Querying OpenAlex for: '{cleaned_query}'")
-            oa_papers = _query_openalex(client, cleaned_query, year_min, limit_per_query)
+    def _fetch_single_query(q: str, client: httpx.Client) -> List[Dict[str, Any]]:
+        logger.info(f"Querying OpenAlex for: '{q}'")
+        oa_papers = _query_openalex(client, q, year_min, limit_per_query)
 
-            logger.info(f"Querying Semantic Scholar for: '{cleaned_query}'")
-            s2_papers = _query_semantic_scholar(client, cleaned_query, year_min, limit_per_query)
+        s2_papers = []
+        if time.time() >= _s2_rate_limited_until:
+            logger.info(f"Querying Semantic Scholar for: '{q}'")
+            s2_papers = _query_semantic_scholar(client, q, year_min, limit_per_query)
 
-            combined_batch = oa_papers + s2_papers
+        return oa_papers + s2_papers
 
-            for paper in combined_batch:
-                doi_key = f"doi:{paper['doi']}" if paper["doi"] else None
-                title_key = f"title:{normalize_title(paper['title'])}"
+    combined_batches: List[Dict[str, Any]] = []
+    with httpx.Client(timeout=6.0, follow_redirects=True) as client:
+        with ThreadPoolExecutor(max_workers=min(len(valid_queries), 4)) as executor:
+            futures = [executor.submit(_fetch_single_query, q, client) for q in valid_queries]
+            for f in as_completed(futures):
+                try:
+                    res = f.result()
+                    if res:
+                        combined_batches.extend(res)
+                except Exception as err:
+                    logger.warning(f"Error executing parallel academic query: {err}")
 
-                # Match by DOI or normalized title
-                match_key = None
-                if doi_key and doi_key in dedup_map:
-                    match_key = doi_key
-                elif title_key in dedup_map:
-                    match_key = title_key
+    for paper in combined_batches:
+        doi_key = f"doi:{paper['doi']}" if paper["doi"] else None
+        title_key = f"title:{normalize_title(paper['title'])}"
 
-                if match_key is None:
-                    # New paper record
-                    primary_key = doi_key or title_key
-                    dedup_map[primary_key] = paper
-                    # Also register title key so future matches find it
-                    if doi_key:
-                        dedup_map[title_key] = paper
-                else:
-                    # Merge complementary fields (e.g. PDF link, OA status, authors)
-                    existing = dedup_map[match_key]
-                    if not existing.get("pdf_url") and paper.get("pdf_url"):
-                        existing["pdf_url"] = paper["pdf_url"]
-                        existing["oa_status"] = True
-                    if not existing.get("authors") and paper.get("authors"):
-                        existing["authors"] = paper["authors"]
-                    if not existing.get("year") and paper.get("year"):
-                        existing["year"] = paper["year"]
-                    if not existing.get("doi") and paper.get("doi"):
-                        existing["doi"] = paper["doi"]
+        # Match by DOI or normalized title
+        match_key = None
+        if doi_key and doi_key in dedup_map:
+            match_key = doi_key
+        elif title_key in dedup_map:
+            match_key = title_key
+
+        if match_key is None:
+            # New paper record
+            primary_key = doi_key or title_key
+            dedup_map[primary_key] = paper
+            # Also register title key so future matches find it
+            if doi_key:
+                dedup_map[title_key] = paper
+        else:
+            # Merge complementary fields (e.g. PDF link, OA status, authors)
+            existing = dedup_map[match_key]
+            if not existing.get("pdf_url") and paper.get("pdf_url"):
+                existing["pdf_url"] = paper["pdf_url"]
+                existing["oa_status"] = True
+            if not existing.get("authors") and paper.get("authors"):
+                existing["authors"] = paper["authors"]
+            if not existing.get("year") and paper.get("year"):
+                existing["year"] = paper["year"]
+            if not existing.get("doi") and paper.get("doi"):
+                existing["doi"] = paper["doi"]
 
     # Extract unique values
     unique_papers: List[Dict[str, Any]] = []

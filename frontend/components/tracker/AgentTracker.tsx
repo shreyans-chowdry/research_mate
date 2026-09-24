@@ -294,6 +294,19 @@ export default function AgentTracker({
               ? "Execution Interrupted"
               : "Agents Active"}
           </div>
+
+          {/* Quick Restart Action */}
+          {!isDone && (
+            <button
+              onClick={onRetry}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-[#0c101a] border border-slate-200 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all cursor-pointer"
+              title="Restart or resume multi-agent research pipeline"
+              id="header-restart-btn"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-indigo-500" />
+              <span className="hidden sm:inline">Restart</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -623,7 +636,7 @@ export default function AgentTracker({
             {/* Model Pill */}
             <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-mono font-semibold text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-md border border-slate-700/60">
               <Cpu className="w-3 h-3 text-indigo-400" />
-              gemini-3.6-flash
+              gemini-3.5-flash
             </span>
 
             {/* Copy Logs Button */}

@@ -68,6 +68,7 @@ export interface ResearchStatus {
   papers_found: number;
   papers_analyzed: number;
   topic?: string;
+  created_at?: string;
 }
 
 export interface ComparisonDimension {
@@ -431,6 +432,24 @@ export async function getResearchStatus(id: string): Promise<ResearchStatus> {
   }
 
   return apiFetch<ResearchStatus>(`/api/research/${id}/status`);
+}
+
+/**
+ * Retry or re-dispatch the multi-agent research pipeline for a stuck, interrupted, or failed project.
+ */
+export async function retryResearch(
+  id: string
+): Promise<{ status: string; project_id: string }> {
+  if (MOCK_MODE) {
+    await delay(300);
+    mockProjectStartTimes.set(id, Date.now());
+    return { status: "restarted", project_id: id };
+  }
+
+  return apiFetch<{ status: string; project_id: string }>(
+    `/api/research/${id}/retry`,
+    { method: "POST" }
+  );
 }
 
 /**

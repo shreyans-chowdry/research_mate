@@ -156,15 +156,34 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
         selected_papers = raw_papers[:6]
         logger.info(f"[{project_id}] Selected {len(selected_papers)} papers for full text acquisition.")
 
-        # Download PDFs where available (limit full text downloads to top 2 OA papers to keep pipeline responsive)
+        await update_project_status(
+            project_id,
+            status="searching",
+            current_step=f"Harvested {len(raw_papers)} candidate papers. Extracting text for top sources...",
+        )
+
+        # Download PDFs where available: prioritize arxiv.org PDFs which download instantly (<0.5s)
+        # Sort so arxiv papers come first for download candidate selection
+        download_candidates = sorted(
+            selected_papers,
+            key=lambda x: (not ("arxiv.org" in (x.get("pdf_url") or "")), not x.get("oa_status", False))
+        )
+
         download_count = 0
-        for p in selected_papers:
+        for p in download_candidates:
             pdf_url = p.get("pdf_url")
             raw_text = ""
             if pdf_url and pdf_url.startswith("http") and p.get("oa_status") and download_count < 2:
-                raw_text = await asyncio.to_thread(download_and_extract_pdf, pdf_url)
-                if raw_text:
-                    download_count += 1
+                try:
+                    raw_text = await asyncio.wait_for(
+                        asyncio.to_thread(download_and_extract_pdf, pdf_url),
+                        timeout=4.0
+                    )
+                    if raw_text:
+                        download_count += 1
+                except (asyncio.TimeoutError, Exception) as dl_err:
+                    logger.warning(f"PDF download skipped/timed out for {pdf_url}: {dl_err}")
+                    raw_text = ""
 
             if not raw_text:
                 # Provide structured abstract fallback so analysis node has rich context

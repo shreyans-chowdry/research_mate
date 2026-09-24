@@ -46,6 +46,7 @@ class ResearchStatusResponse(BaseModel):
     papers_found: int
     papers_analyzed: int
     topic: Optional[str] = None
+    created_at: Optional[str] = None
 
 
 class AnalysisResponse(BaseModel):
@@ -229,7 +230,35 @@ async def get_research_status(
         papers_found=papers_count,
         papers_analyzed=analyzed_count,
         topic=project.topic,
+        created_at=project.created_at.isoformat() if project.created_at else None,
     )
+
+
+@router.post("/{project_id}/retry")
+async def retry_research_project(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-dispatches the multi-agent research pipeline for a stuck, interrupted, or failed project."""
+    try:
+        p_uuid = UUID(project_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid project UUID format.")
+
+    project = await db.get(Project, p_uuid)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    # Reset project status
+    project.status = "pending"
+    project.current_step = "Restarting research pipeline..."
+    project.error_message = None
+    await db.commit()
+
+    background_tasks.add_task(run_orchestrator, str(p_uuid), project.topic)
+    logger.info(f"Re-dispatched multi-agent research pipeline for project {project_id}")
+    return {"status": "restarted", "project_id": str(project_id)}
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
