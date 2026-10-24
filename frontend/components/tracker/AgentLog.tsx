@@ -12,6 +12,7 @@ const AGENT_COLOR: Record<string, string> = {
   Extraction: "#c7a6ff",
   Comparison: "#ffcf87",
   Gaps: "#ffb547",
+  Verifier: "#ff8fb1",
   Report: "#6ee7c2",
   System: "#8b93aa",
 };

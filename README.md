@@ -22,7 +22,7 @@
 
 Traditional literature reviews require researchers to manually screen hundreds of abstracts, download disparate PDFs, normalize methodologies, and deduce overlooked limitations. 
 
-**ResearchMate** automates this entire lifecycle using a coordinated **6-Node LangGraph State Machine**. By combining live scientific APIs (**OpenAlex** and **Semantic Scholar**), high-speed PDF extraction with reference-section stripping, and **Google Gemini** reasoning, ResearchMate delivers:
+**ResearchMate** automates this lifecycle with a **LangGraph multi-agent graph** of seven nodes and two feedback loops. It combines four live scholarly APIs (**OpenAlex**, **Semantic Scholar**, **Europe PMC** and **arXiv**), PDF extraction with reference-section stripping, and **Google Gemini** reasoning (with Gemma fallbacks), and delivers:
 
 1. **Deep Paper Acquisition**: Autonomous search query expansion retrieving real open-access academic literature.
 2. **Reference-Stripped PDF Ingestion**: PyMuPDF extraction discarding terminal bibliographies to conserve LLM context windows.
@@ -35,56 +35,50 @@ Traditional literature reviews require researchers to manually screen hundreds o
 
 ## 🏛️ System Architecture
 
-The pipeline executes as a directed acyclic LangGraph graph running asynchronously on FastAPI:
+The pipeline is a LangGraph `StateGraph` running asynchronously behind FastAPI. Two conditional edges turn it from a
+straight chain into a graph whose agents can send work back:
 
 ```mermaid
 flowchart TD
-    Start([User Submits Research Topic]) --> NodeA[Node A: Query Expansion & Search]
-    
-    subgraph Live Academic Pipeline
-        NodeA -->|OpenAlex & Semantic Scholar APIs| NodeB[Node B: PDF Fetch & PyMuPDF Parsing]
-        NodeB -->|Filter %PDF & Strip References| StorePapers[(PostgreSQL: papers)]
-    end
-
-    subgraph LangGraph Multi-Agent Orchestrator
-        StorePapers --> NodeC[Node C: 6-Dimension Paper Analysis]
-        NodeC -->|Structured JSON Extraction| StoreAnalyses[(PostgreSQL: paper_analyses)]
-        
-        StoreAnalyses --> NodeD[Node D: Cross-Paper Comparative Analysis]
-        NodeD -->|Matrix Synthesis| StoreComp[(PostgreSQL: comparative_dimensions)]
-        
-        StoreComp --> NodeE[Node E: Research Gap Discovery]
-        NodeE -->|Evidence Trails & Citations| StoreGaps[(PostgreSQL: research_gaps)]
-        
-        StoreGaps --> NodeF[Node F: Executive Academic Report Assembly]
-        NodeF -->|Final Synthesis Markdown| StoreReport[(PostgreSQL: research_reports)]
-    end
-
-    StoreReport --> Complete([Live Interactive Dashboard])
+    Start([User submits research topic]) --> Q[Query agent<br/>plans 3-5 search queries]
+    Q --> R[Retrieval node<br/>OpenAlex · Semantic Scholar · Europe PMC · arXiv<br/>dedupe + relevance ranking]
+    R -->|coverage &lt; 3 readable papers<br/>and rounds left| Q
+    R -->|coverage OK| X[Extraction agent<br/>6 fields per paper, in parallel]
+    X --> C[Comparison agent<br/>methodology · datasets · results]
+    C --> G[Gap agent<br/>proposes 2-5 cited gaps]
+    G --> V[Evidence Verifier agent<br/>audits each gap against its cited papers]
+    V -->|too few verified<br/>and rounds left| G
+    V -->|verified gaps| P[Report agent<br/>cited Markdown review]
+    P --> DB[(PostgreSQL)]
+    DB --> UI([Live dashboard])
 ```
 
 ---
 
-## ⚡ Agent Pipeline Breakdown
+## ⚡ Agent Graph Breakdown
 
-| Node | Role | Technology | Output Artifacts |
+| Node | Kind | What it does | Output |
 | :--- | :--- | :--- | :--- |
-| **Node A** | **Query Expansion & Literature Search** | Gemini Flash + OpenAlex / Semantic Scholar | 3–5 expanded academic search queries; 10–20 deduplicated candidate papers with DOIs & open-access URLs |
-| **Node B** | **PDF Acquisition & Text Ingestion** | `httpx` + PyMuPDF (`fitz`) | Full-text extraction with regex-based reference section stripping (saving up to 40% token overhead) |
-| **Node C** | **Structured Dimension Extraction** | Google Gemini (`gemini-3.6-flash`) | Strict JSON extraction: Problem, Methodology, Dataset, Results, Limitations, Future Work |
-| **Node D** | **Cross-Paper Comparative Analysis** | LangGraph State Reducer | Comparative synthesis across methodologies, datasets, and performance trade-offs |
-| **Node E** | **Research Gap Discovery** | Citation Evidence Linker | Unaddressed research gaps mapped directly to paper IDs and citation titles |
-| **Node F** | **Executive Report Synthesis** | Markdown Academic Formatter | Publication-grade literature review report in GitHub-flavored Markdown |
+| **Query** | LLM agent | Breaks the topic into 3–5 search angles. On the coverage loop it receives Retrieval's feedback and the queries already tried, and re-plans broader ones. | Search queries |
+| **Retrieval** | Tool node + decision | Searches 4 scholarly APIs in parallel, de-duplicates by DOI/title, ranks by relevance, fetches open-access PDFs (PyMuPDF). **Decides** whether coverage is sufficient; if not, routes back to Query. | Ranked, stored paper set |
+| **Extraction** | LLM agent (fan-out) | Reads each paper concurrently and extracts Problem, Methodology, Dataset, Results, Limitations, Future Work as strict JSON. Writes "Not reported" instead of guessing. | Structured analyses |
+| **Comparison** | LLM agent (fan-out) | Writes cited cross-paper synthesis on methodology, datasets and results. | 3 comparison write-ups |
+| **Gaps** | LLM agent | Proposes 2–5 gaps from recurring limitations, each citing `[P#]` papers. On the verification loop it receives the Verifier's rejection reasons. | Candidate gaps |
+| **Verifier** | LLM agent + rules | Independently audits every candidate: rejects gaps citing no paper, asks the model whether the cited papers really state the limitation, and narrows evidence to confirmed papers. Sends the Gap agent back if fewer than 2 gaps survive. | Verified, stored gaps |
+| **Report** | LLM agent | Writes the cited literature review in GitHub-flavoured Markdown. | Report |
+
+Loop limits are configurable: `RESEARCHMATE_MIN_PAPERS` (3), `RESEARCHMATE_MAX_SEARCH_ROUNDS` (2),
+`RESEARCHMATE_MIN_GAPS` (2), `RESEARCHMATE_MAX_GAP_ROUNDS` (2).
 
 ---
 
 ## 🖥️ Web Interface
 
-<p align="center"><img src="docs/assets/screenshot-run.png" alt="Live agent run: six agent stations on an orbit, papers appearing as stars, and the streaming agent log" width="900" /></p>
+<p align="center"><img src="docs/assets/screenshot-run.png" alt="Live agent run: agent stations on an orbit, papers appearing as stars, and the streaming agent log" width="900" /></p>
 <p align="center"><img src="docs/assets/screenshot-gaps.png" alt="Gap map: papers on a ring, research gaps glowing between the papers that support them" width="900" /></p>
 <p align="center"><sub>Screenshots use sample data.</sub></p>
 
-- **Live agent run** — the six agents sit on an orbit; the progress arc, active station and paper "stars" update as each one works, beside a streaming log of real agent events (queries issued, papers ranked, PDFs read, gaps found, failures).
+- **Live agent run** — the seven pipeline stages sit on an orbit; the progress arc, active station and paper "stars" update as each one works, beside a streaming log of real agent events (queries issued, coverage re-plans, papers ranked, PDFs read, gaps proposed, verified or rejected, failures).
 - **Gap map** — papers on a ring, each research gap placed between the papers that evidence it, sized by impact. Hover to trace the evidence, click to open a paper.
 - **Citations everywhere** — every `[P3]` the agents write becomes a clickable chip that shows the paper title and jumps to it.
 - **Papers** — ranked by topic relevance, marked *full text* or *abstract only*, with the six extracted fields and links to the PDF, DOI and the exact text the agent read.

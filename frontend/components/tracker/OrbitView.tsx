@@ -8,6 +8,7 @@ export const STAGES = [
   { key: "analyzing", name: "Read", agent: "Extraction" },
   { key: "comparing", name: "Compare", agent: "Comparison" },
   { key: "gap_finding", name: "Find gaps", agent: "Gaps" },
+  { key: "verifying", name: "Verify", agent: "Verifier" },
   { key: "reporting", name: "Report", agent: "Report" },
 ] as const;
 
@@ -55,7 +56,7 @@ function paperPoint(i: number) {
 }
 
 interface Props {
-  stageIndex: number; // 0-5 running, 6 done
+  stageIndex: number; // 0..STAGES.length-1 running, STAGES.length done
   failed: boolean;
   papersFound: number;
   papersRead: number;

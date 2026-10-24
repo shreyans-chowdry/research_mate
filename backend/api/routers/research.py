@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/research", tags=["Research"])
 
-ACTIVE_STATUSES = {"pending", "searching", "analyzing", "comparing", "gap_finding", "reporting"}
+ACTIVE_STATUSES = {"pending", "searching", "analyzing", "comparing", "gap_finding", "verifying", "reporting"}
 
 
 # ---------------------------------------------------------------------------

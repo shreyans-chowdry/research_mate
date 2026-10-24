@@ -114,7 +114,7 @@ export interface AskAnswer {
   citations: Array<{ label: string; paper_id: string; title: string }>;
 }
 
-export const ACTIVE_STATUSES = new Set(["pending", "searching", "analyzing", "comparing", "gap_finding", "reporting"]);
+export const ACTIVE_STATUSES = new Set(["pending", "searching", "analyzing", "comparing", "gap_finding", "verifying", "reporting"]);
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
 

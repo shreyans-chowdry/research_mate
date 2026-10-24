@@ -4,7 +4,7 @@
 create table if not exists projects (
   id uuid primary key default gen_random_uuid(),
   topic text not null,
-  status text not null default 'pending', -- pending | searching | analyzing | comparing | gap_finding | reporting | done | error
+  status text not null default 'pending', -- pending | searching | analyzing | comparing | gap_finding | verifying | reporting | done | error
   current_step text default 'Initializing...',
   error_message text,
   created_at timestamptz default now()

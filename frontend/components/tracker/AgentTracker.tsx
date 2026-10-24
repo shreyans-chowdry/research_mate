@@ -7,7 +7,7 @@ import type { ResearchStatus, AgentEvent } from "@/lib/api";
 import OrbitView, { STAGES } from "./OrbitView";
 import AgentLog from "./AgentLog";
 
-const ORDER = ["pending", "searching", "analyzing", "comparing", "gap_finding", "reporting", "done"];
+const ORDER = ["pending", "searching", "analyzing", "comparing", "gap_finding", "verifying", "reporting", "done"];
 
 /** Which stage failed: the last agent that logged an error, else the last agent that logged anything. */
 function failedStageIndex(events: AgentEvent[]): number {

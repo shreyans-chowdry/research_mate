@@ -22,11 +22,12 @@ const EXAMPLES = [
 const HEADLINE = "Find what the literature hasn’t answered yet.";
 
 const STAGES = [
-  { name: "Plan", text: "Turns your topic into focused search queries." },
-  { name: "Retrieve", text: "Searches OpenAlex, Semantic Scholar, Europe PMC and arXiv, then ranks by relevance." },
+  { name: "Plan", text: "Turns your topic into focused search queries, and re-plans broader ones if coverage is thin." },
+  { name: "Retrieve", text: "Searches OpenAlex, Semantic Scholar, Europe PMC and arXiv, ranks by relevance, and checks there is enough to read." },
   { name: "Read", text: "Pulls open-access full text and extracts problem, method, data, results and limits." },
   { name: "Compare", text: "Contrasts the papers on methods, datasets and results." },
   { name: "Find gaps", text: "Clusters shared limitations into open problems, each tied to its evidence." },
+  { name: "Verify", text: "An independent auditor checks every gap against its cited papers and sends weak ones back." },
   { name: "Report", text: "Writes a cited literature review you can export, question and critique against." },
 ];
 
@@ -306,7 +307,7 @@ export default function HomePage() {
           <div>
             <h2 className="font-display text-3xl leading-tight tracking-[-0.015em]">How a review runs</h2>
             <p className="mt-3 text-muted-foreground">
-              Six agents hand work to each other. You can watch every step live, and nothing in the final report is
+              Seven stages hand work to each other, and two checkpoints can send work back for another pass. You can watch every step live, and nothing in the final report is
               written without a paper behind it.
             </p>
           </div>

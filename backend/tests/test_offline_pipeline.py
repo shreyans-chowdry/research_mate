@@ -75,6 +75,12 @@ class FakeLLM:
                  "severity": "High", "supporting_papers": ["P1", "P2", "P99"]},
                 {"title": "Unsupported gap", "description": "d", "suggested_direction": "s", "severity": "weird", "supporting_papers": ["not-a-paper"]},
             ]), "fake-model"
+        if "independent evidence auditor" in prompt:
+            # Every gap that reaches the auditor cites real papers; confirm the first, reject any others.
+            n = len(re.findall(r"^\[G\d+\]", prompt, re.MULTILINE))
+            out = [{"gap": "G1", "verdict": "supported", "confirmed_papers": ["P1", "P2"], "reason": "both cite English-only data"}]
+            out += [{"gap": f"G{i + 1}", "verdict": "unsupported", "confirmed_papers": [], "reason": "not mentioned"} for i in range(1, n)]
+            return json.dumps(out), "fake-model"
         if "literature review and gap analysis report" in prompt:
             return "# Literature Review\n\nSee [P1] and [P2].", "fake-model"
         if "answering questions about a literature corpus" in prompt:
@@ -130,7 +136,7 @@ def test_full_pipeline_retry_ask_and_critique(patch_pipeline):
             assert status["status"] == "done", status
             assert status["completed_at"]
             agents = {e["agent"] for e in status["events"]}
-            assert {"Query", "Retrieval", "Extraction", "Comparison", "Gaps", "Report"} <= agents
+            assert {"Query", "Retrieval", "Extraction", "Comparison", "Gaps", "Verifier", "Report"} <= agents
             assert any(e["level"] == "warn" for e in status["events"]), "failed paper should be logged"
 
             papers = (await client.get(f"/api/research/{pid}/papers")).json()
@@ -148,7 +154,12 @@ def test_full_pipeline_retry_ask_and_critique(patch_pipeline):
             gaps = (await client.get(f"/api/research/{pid}/gaps")).json()
             assert gaps[0]["severity"] == "high"
             assert [s["id"] for s in gaps[0]["supporting_papers"]] == [papers[0]["id"], papers[1]["id"]]
-            assert gaps[1]["severity"] == "medium" and gaps[1]["supporting_papers"] == []  # no invented evidence
+            # The uncited gap is rejected by the Verifier (never shown without evidence), which triggers one
+            # revision round in the Gap agent; the re-proposed duplicate is not stored twice.
+            assert len(gaps) == 1, gaps
+            gap_prompts = [c for c in patch_pipeline.calls if "open research gaps" in c]
+            assert len(gap_prompts) == 2 and "REJECTED" in gap_prompts[1] and "cites no paper" in gap_prompts[1]
+            assert any(e["agent"] == "Verifier" and "Rejected" in e["message"] for e in status["events"])
 
             # Retry must replace, not duplicate
             before = (len(papers), len(gaps), len((await client.get(f"/api/research/{pid}/comparison")).json()))
@@ -168,7 +179,7 @@ def test_full_pipeline_retry_ask_and_critique(patch_pipeline):
 
             listing = (await client.get("/api/research")).json()
             mine = next(p for p in listing if p["id"] == pid)
-            assert mine["gaps_count"] == 2 and mine["papers_count"] == len(after_papers)
+            assert mine["gaps_count"] == 1 and mine["papers_count"] == len(after_papers)
 
             assert (await client.delete(f"/api/research/{pid}")).status_code == 204
 
@@ -193,6 +204,48 @@ def test_llm_calls_do_not_block_the_event_loop(monkeypatch, patch_pipeline):
             assert (await client.get("/api/health")).status_code == 200
             assert time.perf_counter() - t0 < 0.5
             assert (await critique).status_code == 200
+            await client.delete(f"/api/research/{pid}")
+
+    run(scenario)
+
+
+def test_coverage_loop_replans_queries_when_search_is_thin(monkeypatch, patch_pipeline):
+    """If the first search round finds too little, Retrieval hands back to the Query agent with feedback."""
+    rounds = []
+
+    def thin_then_rich_search(queries, **kw):
+        rounds.append(list(queries))
+        return [] if len(rounds) == 1 else fake_search(queries)
+
+    monkeypatch.setattr(orch, "search_papers", thin_then_rich_search)
+
+    async def scenario():
+        client = await _client()
+        async with client:
+            pid = (await client.post("/api/research", json={"topic": TOPIC})).json()["project_id"]
+            status = (await client.get(f"/api/research/{pid}/status")).json()
+            assert status["status"] == "done", status
+            assert len(rounds) == 2
+            replans = [c for c in patch_pipeline.calls if "already tried" in c]
+            assert len(replans) == 1 and TOPIC in replans[0]
+            assert any(e["agent"] == "Retrieval" and "Coverage insufficient" in e["message"] for e in status["events"])
+            papers = (await client.get(f"/api/research/{pid}/papers")).json()
+            assert len(papers) >= orch.MIN_PAPERS
+            await client.delete(f"/api/research/{pid}")
+
+    run(scenario)
+
+
+def test_coverage_loop_gives_up_after_max_rounds(monkeypatch, patch_pipeline):
+    monkeypatch.setattr(orch, "search_papers", lambda queries, **kw: [])
+
+    async def scenario():
+        client = await _client()
+        async with client:
+            pid = (await client.post("/api/research", json={"topic": TOPIC})).json()["project_id"]
+            status = (await client.get(f"/api/research/{pid}/status")).json()
+            assert status["status"] == "error"
+            assert "after 2 search round" in (status["error_message"] or "")
             await client.delete(f"/api/research/{pid}")
 
     run(scenario)
