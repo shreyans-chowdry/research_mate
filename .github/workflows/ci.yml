@@ -10,9 +10,13 @@ jobs:
   backend-tests:
     name: Backend Test Suite
     runs-on: ubuntu-latest
+    env:
+      # Live tests below only run when this repository secret is set (Settings → Secrets → Actions).
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
 
     services:
       postgres:
+        # pg_isready runs as root inside the container; -U stops "role root does not exist" log noise
         image: postgres:16
         env:
           POSTGRES_USER: postgres
@@ -21,7 +25,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -53,19 +57,23 @@ jobs:
         run: |
           python -m pytest backend/tests -q
 
-      - name: Run Academic Pipeline Tests
+      - name: Run Academic Pipeline Tests (live search APIs, non-blocking)
+        # Calls real scholarly APIs, which rate-limit CI runners; a failure here is reported but does not fail the build.
+        continue-on-error: true
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/researchmate
         run: |
           python backend/pipeline/test_pipeline.py
 
-      - name: Run LangGraph Agent Tests
+      - name: Run LangGraph Agent Tests (live Gemini)
+        if: ${{ env.GOOGLE_API_KEY != '' }}
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/researchmate
         run: |
           python backend/api/agents/test_agents.py
 
-      - name: Run FastAPI Endpoints Tests
+      - name: Run FastAPI Endpoints Tests (live Gemini)
+        if: ${{ env.GOOGLE_API_KEY != '' }}
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/researchmate
         run: |

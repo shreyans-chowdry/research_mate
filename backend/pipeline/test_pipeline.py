@@ -65,7 +65,7 @@ def run_pipeline_tests() -> bool:
             print(f"[FAIL] Paper {idx} year is not an integer: {paper['year']}")
             return False
 
-        if not isinstance(paper["source"], str) or paper["source"] not in {"openalex", "semanticscholar"}:
+        if not isinstance(paper["source"], str) or paper["source"] not in {"openalex", "semanticscholar", "europe_pmc", "arxiv"}:
             print(f"[FAIL] Paper {idx} source is invalid: {paper['source']}")
             return False
 
